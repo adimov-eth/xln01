@@ -1,0 +1,18 @@
+{
+  "name": "xln-poc",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "bun run dist/index.js"
+  },
+  "dependencies": {
+    "@noble/curves": "^1.2.0",
+    "@noble/hashes": "^1.3.0",
+    "rlp": "^2.2.8"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}
