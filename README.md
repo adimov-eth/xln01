@@ -5,6 +5,7 @@ A minimal implementation of the XLN (Cross-Local Network) consensus protocol dem
 ## Overview
 
 This proof-of-concept implements:
+
 - 5-signer BFT consensus with threshold of 3
 - Pure functional state machines for deterministic execution
 - BLS12-381 aggregate signatures (Hanko)
@@ -45,6 +46,7 @@ bun run start
 ```
 
 This will:
+
 1. Initialize 5 signers with equal voting weight
 2. Create a chat transaction from the first signer
 3. Process the consensus flow through 4 ticks:
@@ -73,6 +75,7 @@ This will:
 ## Future Extensions
 
 This PoC provides a foundation for:
+
 - Persistence (WAL and snapshots)
 - Network transport
 - Multi-entity support

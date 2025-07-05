@@ -1,0 +1,7 @@
+node_modules/
+dist/
+bun.lockb
+*.log
+.husky/
+coverage/
+.env*

@@ -1,13 +1,14 @@
 {
-  "permissions": {
-    "allow": [
-      "Bash(mkdir:*)",
-      "Bash(bun install:*)",
-      "Bash(bun run:*)",
-      "Bash(ls:*)",
-      "Bash(DEV_SKIP_SIGS=1 bun run start)",
-      "Bash(bun x tsc:*)"
-    ],
-    "deny": []
-  }
+	"permissions": {
+		"allow": [
+			"Bash(mkdir:*)",
+			"Bash(bun install:*)",
+			"Bash(bun run:*)",
+			"Bash(ls:*)",
+			"Bash(DEV_SKIP_SIGS=1 bun run start)",
+			"Bash(bun x tsc:*)",
+			"Bash(bun add:*)"
+		],
+		"deny": []
+	}
 }
