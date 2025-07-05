@@ -1,6 +1,6 @@
 import { applyServerBlock } from './server';
 import { sign, aggregate, randomPriv, pub, addr } from '../crypto/bls';
-import { Input, Replica, Frame, EntityState, Quorum } from '../types';
+import { Input, Replica, Frame, EntityState, Quorum, Hex } from '../types';
 
 /* ──────────── Deterministic demo key generation (5 signers) ──────────── */
 const PRIVS = Array.from({ length: 5 }, () => randomPriv());
@@ -54,25 +54,25 @@ export class Runtime {
     const fulfilledOutbox = await Promise.all(outbox.map(async msg => {
       if (msg.cmd.type === 'SIGN' && msg.cmd.sig === '0x00') {
         // Sign the frame hash with the signer's private key
-        const signerIndex = ADDRS.findIndex(a => a === msg.cmd.signer);
-        msg.cmd.sig = await sign(Buffer.from(msg.cmd.frameHash.slice(2), 'hex'), PRIVS[signerIndex]);
+        const signerIndex = ADDRS.findIndex(a => a === (msg.cmd as any).signer);
+        msg.cmd.sig = await sign(Buffer.from((msg.cmd as any).frameHash.slice(2), 'hex'), PRIVS[signerIndex]);
       }
       if (msg.cmd.type === 'COMMIT' && msg.cmd.hanko === '0x00') {
         // Aggregate all collected signatures into one Hanko, and remove individual sigs from frame
         const frame = msg.cmd.frame as any;
-        let realSigs: string[] = [];
+        let realSigs: Hex[] = [];
         
         // Handle both Map and object representations
         if (frame.sigs instanceof Map) {
-          realSigs = [...frame.sigs.values()].filter(sig => sig !== '0x00');
+          realSigs = [...frame.sigs.values()].filter(sig => sig !== '0x00') as Hex[];
         } else if (frame.sigs && typeof frame.sigs === 'object') {
-          realSigs = Object.values(frame.sigs).filter((sig: any) => sig !== '0x00');
+          realSigs = Object.values(frame.sigs).filter((sig: any) => sig !== '0x00') as Hex[];
         }
         
         if (realSigs.length > 0) {
           msg.cmd.hanko = aggregate(realSigs);
         } else {
-          msg.cmd.hanko = '0x' + '00'.repeat(96); // Dummy 96-byte signature for testing
+          msg.cmd.hanko = ('0x' + '00'.repeat(96)) as Hex; // Dummy 96-byte signature for testing
         }
         delete frame.sigs;
         delete frame.hash;

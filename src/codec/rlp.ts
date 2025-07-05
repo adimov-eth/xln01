@@ -10,13 +10,13 @@ const bufToBn = (b: Buffer): UInt64 =>
 
 /* — Transaction encode/decode — */
 export const encTx = (t: Transaction): Buffer => 
-  rlp.encode([
+  Buffer.from(rlp.encode([
     t.kind,
     bnToBuf(t.nonce),
     t.from,
     JSON.stringify(t.body),  // body is small JSON (e.g. {"message": "hi"})
     t.sig,
-  ]);
+  ]));
 export const decTx = (b: Buffer): Transaction => {
   const [k, n, f, body, sig] = rlp.decode(b) as Buffer[];
   return {
@@ -30,12 +30,12 @@ export const decTx = (b: Buffer): Transaction => {
 
 /* — Entity Frame encode/decode — */
 export const encFrame = <S>(f: Frame<S>): Buffer =>
-  rlp.encode([
+  Buffer.from(rlp.encode([
     bnToBuf(f.height),
     f.ts,
     f.txs.map(encTx),
     rlp.encode(f.state as any),   // state is encoded as RLP of its data structure
-  ]);
+  ]));
 export const decFrame = <S>(b: Buffer): Frame<S> => {
   const [h, ts, txs, st] = rlp.decode(b) as any[];
   return {
@@ -47,7 +47,7 @@ export const decFrame = <S>(b: Buffer): Frame<S> => {
 };
 
 /* — Command encode/decode (wrapped in Input) — */
-const encCmd = (c: Command): unknown => {
+const encCmd = (c: Command): any[] => {
   // Custom replacer to handle BigInt serialization
   const replacer = (key: string, value: any) =>
     typeof value === 'bigint' ? value.toString() : value;
@@ -68,31 +68,31 @@ const decCmd = (arr: any[]): Command => {
 
 /* — Input (wire packet) encode/decode — */
 export const encInput = (i: Input): Buffer =>
-  rlp.encode([ i.from, i.to, encCmd(i.cmd) ]);
+  Buffer.from(rlp.encode([ i.from, i.to, encCmd(i.cmd) ]));
 export const decInput = (b: Buffer): Input => {
   const [from, to, cmdArr] = rlp.decode(b) as any[];
   return {
-    from: from.toString(),
-    to  : to.toString(),
+    from: from.toString() as Hex,
+    to  : to.toString() as Hex,
     cmd : decCmd(cmdArr)
-  };
+  } as Input;
 };
 
 /* — ServerFrame encode/decode — */
 export const encServerFrame = (f: import('../types').ServerFrame): Buffer =>
-  rlp.encode([
+  Buffer.from(rlp.encode([
     bnToBuf(f.height),
     f.ts,
     f.inputs.map(encInput),
     f.root,
-  ]);
+  ]));
 export const decServerFrame = (b: Buffer): import('../types').ServerFrame => {
   const [h, ts, ins, root] = rlp.decode(b) as any[];
-  const frame = {
+  const frame: import('../types').ServerFrame = {
     height: bufToBn(h),
     ts: Number(ts.toString()),
     inputs: (ins as Buffer[]).map(decInput),
-    root: `0x${root.toString('hex')}`,
+    root: (`0x${root.toString('hex')}`) as Hex,
     hash: '0x00' as Hex,  // will be filled after decoding if needed
   };
   frame.hash = ('0x' + Buffer.from(keccak(encServerFrame(frame))).toString('hex')) as Hex;

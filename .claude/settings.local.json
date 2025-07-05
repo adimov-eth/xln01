@@ -5,7 +5,8 @@
       "Bash(bun install:*)",
       "Bash(bun run:*)",
       "Bash(ls:*)",
-      "Bash(DEV_SKIP_SIGS=1 bun run start)"
+      "Bash(DEV_SKIP_SIGS=1 bun run start)",
+      "Bash(bun x tsc:*)"
     ],
     "deny": []
   }

@@ -61,7 +61,7 @@ export function applyServerBlock(prev: ServerState, batch: Input[], ts: TS) {
       const eKey = addrKey(baseReplica.address);  // e.g. "demo:chat"
       // Clone and insert one Replica per signer in the quorum (each signer gets its own replica state)
       for (const signerAddr of Object.keys(baseReplica.last.state.quorum.members)) {
-        const replicaCopy: Replica = { ...baseReplica, proposer: signerAddr };
+        const replicaCopy: Replica = { ...baseReplica, proposer: signerAddr as Address };
         replicas.set(`${eKey}:${signerAddr}`, replicaCopy);
       }
       continue;  // move to next input
@@ -82,10 +82,10 @@ export function applyServerBlock(prev: ServerState, batch: Input[], ts: TS) {
           for (const s of Object.keys(updatedRep.last.state.quorum.members)) {
             if (s === updatedRep.proposer) continue;  // skip proposer itself
             enqueue({
-              from: s,
+              from: s as Address,
               to:   updatedRep.proposer,  // Send to proposer
               cmd:  { type: 'SIGN', addrKey: cmd.addrKey,
-                      signer: s, frameHash: updatedRep.proposal.hash, sig: '0x00' }
+                      signer: s as Address, frameHash: updatedRep.proposal.hash, sig: '0x00' as Hex }
             });
           }
         }
@@ -102,15 +102,13 @@ export function applyServerBlock(prev: ServerState, batch: Input[], ts: TS) {
             for (const signerAddr of Object.keys(updatedRep.last.state.quorum.members)) {
               enqueue({
                 from: updatedRep.proposer, 
-                to: signerAddr,
+                to: signerAddr as Address,
                 cmd:  { type: 'COMMIT', addrKey: cmd.addrKey,
-                        hanko: '0x00', frame: {
+                        hanko: '0x00' as Hex, frame: {
                           height: updatedRep.proposal!.height,
                           ts: updatedRep.proposal!.ts,
                           txs: updatedRep.proposal!.txs,
-                          state: updatedRep.proposal!.state,
-                          sigs: Object.fromEntries(updatedRep.proposal!.sigs), // Convert Map to object
-                          hash: updatedRep.proposal!.hash
+                          state: updatedRep.proposal!.state
                         } }
               });
             }

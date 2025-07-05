@@ -33,8 +33,8 @@ export const aggregate = (sigs: Hex[]): Hex =>
 
 export const verifyAggregate = (
   hanko: Hex, msgHash: Hex, pubs: PubKey[],
-): boolean => bls.verifyMultipleAggregate(
+): boolean => bls.verifyBatch(
   hexToBytes(hanko),
-  pubs,
   pubs.map(() => hexToBytes(msgHash)),
+  pubs,
 );
