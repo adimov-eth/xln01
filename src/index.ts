@@ -1,11 +1,11 @@
 import { Runtime } from './core/runtime';
-import { Input, Transaction } from './types';
 import { sign } from './crypto/bls';
+import { Input, Transaction } from './types';
 
 // Demo script showing the full consensus flow for a chat message
 
 // Skip signature verification for demo
-process.env.DEV_SKIP_SIGS = '1';
+// process.env.DEV_SKIP_SIGS = '1';
 
 // Initialize the runtime (which sets up the 5 signers and genesis state)
 const runtime = new Runtime();

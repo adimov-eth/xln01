@@ -71,7 +71,7 @@ export type Command =
   | { type: 'ADD_TX';  addrKey: string; tx: Transaction }
   | { type: 'PROPOSE'; addrKey: string; ts: TS }
   | { type: 'SIGN';    addrKey: string; signer: Address; frameHash: Hex; sig: Hex }
-  | { type: 'COMMIT';  addrKey: string; hanko: Hanko; frame: Frame<EntityState> };
+  | { type: 'COMMIT';  addrKey: string; hanko: Hanko; frame: Frame<EntityState>; signers: Address[] };
 
 /* ──────────── wire envelope (transport-neutral) ──────────── */
 export interface Input {

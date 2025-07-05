@@ -1,11 +1,15 @@
 import { applyServerBlock } from './server';
-import { sign, aggregate, randomPriv, pub, addr } from '../crypto/bls';
-import { Input, Replica, Frame, EntityState, Quorum, Hex } from '../types';
+import { sign, aggregate, randomPriv, pub, addr, PubKey } from '../crypto/bls';
+import { Input, Replica, Frame, EntityState, Quorum, Hex, Address } from '../types';
 
 /* ──────────── Deterministic demo key generation (5 signers) ──────────── */
 const PRIVS = Array.from({ length: 5 }, () => randomPriv());
 const PUBS  = PRIVS.map(pub);
 const ADDRS = PUBS.map(addr);
+
+// Create a mapping from address to public key for signature verification
+export const ADDR_TO_PUB = new Map<string, PubKey>();
+ADDRS.forEach((addr, i) => ADDR_TO_PUB.set(addr, PUBS[i]));
 
 /* ──────────── Bootstrap an initial Replica (genesis state) ──────────── */
 const genesisEntity = (): Replica => {
@@ -63,24 +67,35 @@ export class Runtime {
         msg.cmd.sig = await sign(Buffer.from((msg.cmd as any).frameHash.slice(2), 'hex'), PRIVS[signerIndex]);
       }
       if (msg.cmd.type === 'COMMIT' && msg.cmd.hanko === '0x00') {
-        // Aggregate all collected signatures into one Hanko, and remove individual sigs from frame
-        const frame = msg.cmd.frame as any;
+        // Aggregate all collected signatures into one Hanko
+        const sigs = (msg.cmd as any)._sigs;
         let realSigs: Hex[] = [];
         
         // Handle both Map and object representations
-        if (frame.sigs instanceof Map) {
-          realSigs = [...frame.sigs.values()].filter(sig => sig !== '0x00') as Hex[];
-        } else if (frame.sigs && typeof frame.sigs === 'object') {
-          realSigs = Object.values(frame.sigs).filter((sig: any) => sig !== '0x00') as Hex[];
+        if (sigs instanceof Map) {
+          realSigs = [...sigs.values()].filter(sig => sig !== '0x00') as Hex[];
+        } else if (sigs && typeof sigs === 'object') {
+          realSigs = Object.values(sigs).filter((sig: any) => sig !== '0x00') as Hex[];
         }
         
         if (realSigs.length > 0) {
+          // Aggregate the signatures
+          
+          // Get the list of signers who actually signed
+          const signers: Address[] = sigs instanceof Map 
+            ? [...sigs.entries()].filter(([_, sig]) => sig !== '0x00').map(([addr, _]) => addr as Address)
+            : Object.entries(sigs).filter(([_, sig]) => sig !== '0x00').map(([addr, _]) => addr as Address);
+          
           msg.cmd.hanko = aggregate(realSigs);
+          msg.cmd.signers = signers;
+          
+          // Remove the temporary _sigs field
+          delete (msg.cmd as any)._sigs;
         } else {
+          // This should not happen in normal operation
+          console.error('WARNING: No signatures found for aggregation');
           msg.cmd.hanko = ('0x' + '00'.repeat(96)) as Hex; // Dummy 96-byte signature for testing
         }
-        delete frame.sigs;
-        delete frame.hash;
       }
       return msg;
     }));

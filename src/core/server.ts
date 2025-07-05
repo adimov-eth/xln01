@@ -1,6 +1,6 @@
 import {
   Input, Replica, Command, addrKey, ServerFrame, ServerState,
-  TS, Hex, Address, UInt64
+  TS, Hex, Address, UInt64, Frame, EntityState
 } from '../types';
 import { applyCommand } from './entity';
 import { keccak_256 as keccak } from '@noble/hashes/sha3';
@@ -78,9 +78,8 @@ export function applyServerBlock(prev: ServerState, batch: Input[], ts: TS) {
     switch (cmd.type) {
       case 'PROPOSE': {
         if (!rep.proposal && updatedRep.proposal) {
-          // Proposal just created: ask all other signers to SIGN
+          // Proposal just created: ask all signers (including proposer) to SIGN
           for (const s of Object.keys(updatedRep.last.state.quorum.members)) {
-            if (s === updatedRep.proposer) continue;  // skip proposer itself
             enqueue({
               from: s as Address,
               to:   updatedRep.proposer,  // Send to proposer
@@ -104,12 +103,16 @@ export function applyServerBlock(prev: ServerState, batch: Input[], ts: TS) {
                 from: updatedRep.proposer, 
                 to: signerAddr as Address,
                 cmd:  { type: 'COMMIT', addrKey: cmd.addrKey,
-                        hanko: '0x00' as Hex, frame: {
+                        hanko: '0x00' as Hex, 
+                        frame: {
                           height: updatedRep.proposal!.height,
                           ts: updatedRep.proposal!.ts,
                           txs: updatedRep.proposal!.txs,
                           state: updatedRep.proposal!.state
-                        } }
+                        } as Frame<EntityState>,
+                        signers: [], // Will be filled by runtime
+                        _sigs: Object.fromEntries(updatedRep.proposal!.sigs) // Pass sigs separately for runtime
+                      } as any
               });
             }
           }

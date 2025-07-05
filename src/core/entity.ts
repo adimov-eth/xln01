@@ -3,7 +3,8 @@ import {
   ProposedFrame, Address, Hex, TS
 } from '../types';
 import { keccak_256 as keccak } from '@noble/hashes/sha3';
-import { verifyAggregate } from '../crypto/bls';
+import { verifyAggregate, PubKey } from '../crypto/bls';
+import { ADDR_TO_PUB } from './runtime';
 
 /* ──────────── frame hashing ──────────── */
 /** Compute canonical hash of a frame's content using keccak256. */
@@ -37,11 +38,14 @@ const validateCommit = (
   frame: Frame<EntityState>,
   hanko: Hex,
   prev: Frame<EntityState>,
+  signers: Address[],
 ): boolean => {
   const quorum = prev.state.quorum;
   
   // Check height continuity
-  if (frame.height !== prev.height + 1n) return false;
+  if (frame.height !== prev.height + 1n) {
+    return false;
+  }
   
   // Replay transactions to verify state
   const replay = execFrame(prev, frame.txs, frame.ts);
@@ -49,12 +53,43 @@ const validateCommit = (
   // Compare the replayed state hash with the frame's state hash
   const replayStateHash = hashFrame(replay);
   const frameStateHash = hashFrame(frame);
-  if (replayStateHash !== frameStateHash) return false;
+  if (replayStateHash !== frameStateHash) {
+    return false;
+  }
   
   // Verify BLS aggregate signature (skip if DEV flag set)
   if (!process.env.DEV_SKIP_SIGS) {
-    const pubKeys = Object.keys(quorum.members);
-    if (!verifyAggregate(hanko, hashFrame(frame), pubKeys as any)) {
+    // Check we have enough signers for threshold
+    let totalPower = 0;
+    for (const signer of signers) {
+      totalPower += sharesOf(signer, quorum);
+    }
+    if (totalPower < quorum.threshold) {
+      console.error(`Insufficient signing power: ${totalPower} < ${quorum.threshold}`);
+      return false;
+    }
+    
+    // Get public keys only for signers who signed
+    const pubKeys: PubKey[] = [];
+    for (const addr of signers) {
+      const pubKey = ADDR_TO_PUB.get(addr);
+      if (!pubKey) {
+        console.error(`No public key found for signer ${addr}`);
+        return false;
+      }
+      pubKeys.push(pubKey);
+    }
+    
+    const frameHash = hashFrame(frame);
+    
+    try {
+      const isValid = verifyAggregate(hanko, frameHash, pubKeys);
+      if (!isValid) {
+        // BLS signature verification failed
+        return false;
+      }
+    } catch (e) {
+      console.error('BLS verification error:', e);
       return false;
     }
   }
@@ -116,7 +151,7 @@ export const applyCommand = (rep: Replica, cmd: Command): Replica => {
       const proposal: ProposedFrame<EntityState> = {
         ...frame,
         hash: hashFrame(frame),
-        sigs: new Map([[ rep.proposer, '0x00' ]])  // proposer's own signature placeholder
+        sigs: new Map()  // Start with empty signatures, will be filled by runtime
       };
       return {
         ...rep,
@@ -140,7 +175,15 @@ export const applyCommand = (rep: Replica, cmd: Command): Replica => {
       // Accept Commit even if this replica never saw the proposal
       
       // 1. Validate frame & Hanko against our own last state
-      if (!validateCommit(cmd.frame, cmd.hanko, rep.last)) return rep;
+      try {
+        if (!validateCommit(cmd.frame, cmd.hanko, rep.last, cmd.signers)) {
+          // Validation failed, replica will not apply this commit
+          return rep;
+        }
+      } catch (e) {
+        console.error('COMMIT validation error:', e);
+        return rep;
+      }
       
       // 2. Drop txs that were just committed
       const newMempool = rep.mempool.filter(
