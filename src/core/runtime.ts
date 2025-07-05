@@ -25,9 +25,9 @@ export const ADDR_TO_PUB = new Map<string, PubKey>(ADDRS.map((addr, i) => [addr,
 /* ──────────── Bootstrap an initial Replica (genesis state) ──────────── */
 const genesisEntity = (): Replica => {
 	const quorum: Quorum = {
-		threshold: QUORUM_THRESHOLD,
+		threshold: BigInt(QUORUM_THRESHOLD),
 		members: Object.fromEntries(
-			ADDRS.map(address => [address, { nonce: INITIAL_HEIGHT, shares: DEFAULT_SHARES_PER_SIGNER }]),
+			ADDRS.map(address => [address, { nonce: INITIAL_HEIGHT, shares: BigInt(DEFAULT_SHARES_PER_SIGNER) }]),
 		),
 	};
 	const initState: EntityState = { quorum, chat: [] };

@@ -57,7 +57,7 @@ export const hashFrame = <T>(frame: Frame<T>): Hex => {
 const sortTransaction = (a: Transaction, b: Transaction) =>
 	a.nonce !== b.nonce ? (a.nonce < b.nonce ? -1 : 1) : a.from !== b.from ? (a.from < b.from ? -1 : 1) : 0;
 
-const getSharesOf = (address: Address, quorum: Quorum) => quorum.members[address]?.shares ?? 0;
+const getSharesOf = (address: Address, quorum: Quorum) => quorum.members[address]?.shares ?? 0n;
 
 // Currently unused but kept for clarity
 // const calculatePower = (signatures: Map<Address, Hex>, quorum: Quorum) =>
@@ -91,7 +91,7 @@ const validateCommit = ({ frame, hanko, prev, signers }: ValidateCommitParams): 
 	// Verify BLS aggregate signature (skip if DEV flag set)
 	if (!process.env.DEV_SKIP_SIGS) {
 		// Check we have enough signers for threshold
-		const totalPower = signers.reduce((sum, signer) => sum + getSharesOf(signer, quorum), 0);
+		const totalPower = signers.reduce((sum: bigint, signer) => sum + getSharesOf(signer, quorum), 0n);
 		if (totalPower < quorum.threshold) {
 			console.error(`Insufficient signing power: ${totalPower} < ${quorum.threshold}`);
 			return false;
@@ -183,11 +183,13 @@ export const applyCommand = ({ replica, command }: ApplyCommandParams): Replica 
 
 		case 'PROPOSE': {
 			if (replica.isAwaitingSignatures || replica.mempool.length === 0) {
+				console.log(`PROPOSE skipped: awaiting=${replica.isAwaitingSignatures}, mempool=${replica.mempool.length}`);
 				return replica; // nothing to do (either already proposing or no tx to propose)
 			}
 			// Build a new frame from current mempool transactions
 			const frameResult = execFrame({ prev: replica.last, transactions: replica.mempool, timestamp: command.ts });
 			if (!frameResult.ok) {
+				console.log(`PROPOSE failed: frame build error - ${frameResult.error}`);
 				return replica; // Failed to build frame, keep current state
 			}
 			const frame = frameResult.value;

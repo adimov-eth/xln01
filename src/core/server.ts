@@ -53,7 +53,7 @@ export function applyServerBlock({ prev, batch, timestamp }: ApplyServerBlockPar
 			   We use addrKey (jurisdiction:entity) plus signer's address for uniqueness when needed. */
 			const signerPart =
 				command.type === 'ADD_TX'
-					? command.tx.from
+					? input.to // Route to the intended recipient (proposer)
 					: command.type === 'SIGN'
 						? input.to // Route to the proposer (recipient)
 						: command.type === 'PROPOSE'
@@ -143,17 +143,8 @@ export function applyServerBlock({ prev, batch, timestamp }: ApplyServerBlockPar
 						return [];
 					}
 					case 'ADD_TX': {
-						if (!updatedReplica.isAwaitingSignatures && updatedReplica.mempool.length) {
-							// After adding a tx, if not already proposing, trigger a PROPOSE on next tick
-							// The proposer's replica handles the PROPOSE, so we need to route to it
-							return [
-								{
-									from: updatedReplica.proposer,
-									to: updatedReplica.proposer,
-									cmd: { type: 'PROPOSE' as const, addrKey: command.addrKey, ts: timestamp },
-								},
-							];
-						}
+						// ADD_TX only adds to mempool, doesn't trigger PROPOSE
+						// PROPOSE will be triggered once per tick if there are pending transactions
 						return [];
 					}
 					case 'COMMIT':
@@ -171,6 +162,42 @@ export function applyServerBlock({ prev, batch, timestamp }: ApplyServerBlockPar
 		{ finalReplicas: new Map(prev.replicas), allOutbox: [] as Input[] },
 	);
 
+	/* ─── Generate PROPOSE commands for entities with pending transactions ─── */
+	const proposeEntries: Array<[string, Input]> = [];
+	
+	finalReplicas.forEach((replica, key) => {
+		const entityKey = replica.address.jurisdiction + ':' + replica.address.entityId;
+		
+		// Only process each entity once, and only if it's the proposer's replica
+		if (key.endsWith(':' + replica.proposer) &&
+		    !replica.isAwaitingSignatures && 
+		    replica.mempool.length > 0) {
+			
+			proposeEntries.push([entityKey, {
+				from: replica.proposer,
+				to: replica.proposer,
+				cmd: {
+					type: 'PROPOSE' as const,
+					addrKey: entityKey,
+					ts: timestamp,
+				},
+			}]);
+		}
+	});
+	
+	// Filter to unique entities and extract commands
+	const seenEntities = new Set<string>();
+	const proposeCommands = proposeEntries
+		.filter(([entityKey]) => {
+			if (seenEntities.has(entityKey)) return false;
+			seenEntities.add(entityKey);
+			return true;
+		})
+		.map(([, input]) => input);
+	
+	// Add PROPOSE commands to outbox
+	const finalOutbox = [...allOutbox, ...proposeCommands];
+	
 	/* ─── After processing all inputs, build the ServerFrame for this tick ─── */
 	const newHeight = prev.height + 1n;
 	const rootHash = computeRoot(finalReplicas); // Merkle root of all Entity states after this tick
@@ -196,6 +223,6 @@ export function applyServerBlock({ prev, batch, timestamp }: ApplyServerBlockPar
 	return {
 		state: { replicas: finalReplicas, height: newHeight },
 		frame,
-		outbox: allOutbox,
+		outbox: finalOutbox,
 	};
 }
