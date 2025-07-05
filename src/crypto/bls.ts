@@ -1,40 +1,67 @@
 import { keccak_256 as keccak } from '@noble/hashes/sha3';
 import { bls12_381 as bls } from '@noble/curves/bls12-381';
 import type { Hex } from '../types';
+import { HASH_HEX_PREFIX, ADDRESS_LENGTH, HEX_PREFIX_LENGTH } from '../constants';
 
-const bytesToHex = (b: Uint8Array): Hex =>
-  ('0x' + Buffer.from(b).toString('hex')) as Hex;
-const hexToBytes = (h: Hex) =>
-  Uint8Array.from(Buffer.from(h.slice(2), 'hex'));
+const convertBytesToHex = (bytes: Uint8Array): Hex => (HASH_HEX_PREFIX + Buffer.from(bytes).toString('hex')) as Hex;
+const convertHexToBytes = (hex: Hex) => Uint8Array.from(Buffer.from(hex.slice(HEX_PREFIX_LENGTH), 'hex'));
 
 /* ──────────── key helpers ──────────── */
 export type PrivKey = Uint8Array;
-export type PubKey  = Uint8Array;
+export type PubKey = Uint8Array;
 
-export const randomPriv = (): PrivKey =>
-  bls.utils.randomPrivateKey();
-export const pub = (pr: PrivKey): PubKey =>
-  bls.getPublicKey(pr);
-export const addr = (pb: PubKey): Hex => {
-  const h = keccak(pb);
-  return bytesToHex(h.slice(-20));
-  // take rightmost 20 bytes of keccak(pubkey) as address (ETH-style)
+export const randomPriv = (): PrivKey => bls.utils.randomPrivateKey();
+
+export interface GetPublicKeyParams {
+	privateKey: PrivKey;
+}
+
+export const getPublicKey = ({ privateKey }: GetPublicKeyParams): PubKey => bls.getPublicKey(privateKey);
+
+export interface DeriveAddressParams {
+	publicKey: PubKey;
+}
+
+export const deriveAddress = ({ publicKey }: DeriveAddressParams): Hex => {
+	const hash = keccak(publicKey);
+	return convertBytesToHex(hash.slice(-ADDRESS_LENGTH));
+	// take rightmost 20 bytes of keccak(pubkey) as address (ETH-style)
 };
 
+/* ──────────── RORO Pattern Types ──────────── */
+export interface SignParams {
+	message: Uint8Array;
+	privateKey: PrivKey;
+}
+
+export interface VerifyParams {
+	message: Uint8Array;
+	signature: Hex;
+	publicKey: PubKey;
+}
+
+export interface VerifyAggregateParams {
+	hanko: Hex;
+	messageHash: Hex;
+	publicKeys: PubKey[];
+}
+
 /* ──────────── signatures ──────────── */
-export const sign = async (msg: Uint8Array, pr: PrivKey): Promise<Hex> =>
-  bytesToHex(await bls.sign(msg, pr));
+export const sign = ({ message, privateKey }: SignParams): Hex => convertBytesToHex(bls.sign(message, privateKey));
 
-export const verify = async (msg: Uint8Array, sig: Hex, pb: PubKey): Promise<boolean> =>
-  bls.verify(hexToBytes(sig), msg, pb);
+export const verify = ({ message, signature, publicKey }: VerifyParams): boolean =>
+	bls.verify(convertHexToBytes(signature), message, publicKey);
 
-export const aggregate = (sigs: Hex[]): Hex =>
-  bytesToHex(bls.aggregateSignatures(sigs.map(hexToBytes)));
+export interface AggregateParams {
+	signatures: Hex[];
+}
 
-export const verifyAggregate = (
-  hanko: Hex, msgHash: Hex, pubs: PubKey[],
-): boolean => bls.verifyBatch(
-  hexToBytes(hanko),
-  pubs.map(() => hexToBytes(msgHash)),
-  pubs,
-);
+export const aggregate = ({ signatures }: AggregateParams): Hex =>
+	convertBytesToHex(bls.aggregateSignatures(signatures.map(convertHexToBytes)));
+
+export const verifyAggregate = ({ hanko, messageHash, publicKeys }: VerifyAggregateParams): boolean =>
+	bls.verifyBatch(
+		convertHexToBytes(hanko),
+		publicKeys.map(() => convertHexToBytes(messageHash)),
+		publicKeys,
+	);
