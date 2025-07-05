@@ -1,8 +1,22 @@
-import { Replica, Command, EntityState, Frame, Transaction, Quorum, ProposedFrame, Address, Hex, TS, Result, ok, err } from '../types';
+import {
+	Replica,
+	Command,
+	EntityState,
+	Frame,
+	Transaction,
+	Quorum,
+	ProposedFrame,
+	Address,
+	Hex,
+	TS,
+	Result,
+	ok,
+	err,
+} from '../types';
 import { keccak_256 as keccak } from '@noble/hashes/sha3';
 import { verifyAggregate, PubKey } from '../crypto/bls';
 import { ADDR_TO_PUB } from './runtime';
-import { HASH_HEX_PREFIX } from '../constants';
+import { HASH_HEX_PREFIX, DUMMY_SIGNATURE } from '../constants';
 
 /* ──────────── RORO Pattern Types ──────────── */
 export interface ValidateCommitParams {
@@ -141,16 +155,13 @@ export const execFrame = ({ prev, transactions, timestamp }: ExecFrameParams): R
 	// Create a new sorted array without mutating the original
 	// eslint-disable-next-line fp/no-mutating-methods
 	const orderedTxs = [...txs].sort(sortTransaction);
-	
+
 	// Apply transactions functionally, propagating errors
-	const finalStateResult = orderedTxs.reduce<Result<EntityState>>(
-		(stateResult, tx) => {
-			if (!stateResult.ok) return stateResult;
-			return applyTx({ state: stateResult.value, transaction: tx, timestamp });
-		},
-		ok(prev.state)
-	);
-	
+	const finalStateResult = orderedTxs.reduce<Result<EntityState>>((stateResult, tx) => {
+		if (!stateResult.ok) return stateResult;
+		return applyTx({ state: stateResult.value, transaction: tx, timestamp });
+	}, ok(prev.state));
+
 	if (!finalStateResult.ok) return err(finalStateResult.error);
 	const currentState = finalStateResult.value;
 	return ok({
@@ -180,11 +191,20 @@ export const applyCommand = ({ replica, command }: ApplyCommandParams): Replica 
 				return replica; // Failed to build frame, keep current state
 			}
 			const frame = frameResult.value;
+			// For single-signer quorum (threshold=1), seed with proposer's signature
+			const quorum = replica.last.state.quorum;
+			const shouldSeedProposerSig = quorum.threshold === 1n && replica.proposer && quorum.members[replica.proposer];
+			const initialSigs =
+				shouldSeedProposerSig && replica.proposer
+					? new Map<Address, Hex>([[replica.proposer, DUMMY_SIGNATURE as Hex]])
+					: new Map<Address, Hex>();
+
 			const proposal: ProposedFrame<EntityState> = {
 				...frame,
 				hash: hashFrame(frame),
-				sigs: new Map(), // Start with empty signatures, will be filled by runtime
+				sigs: initialSigs,
 			};
+
 			return {
 				...replica,
 				mempool: [],
@@ -208,7 +228,9 @@ export const applyCommand = ({ replica, command }: ApplyCommandParams): Replica 
 
 			// 1. Validate frame & Hanko against our own last state
 			try {
-				if (!validateCommit({ frame: command.frame, hanko: command.hanko, prev: replica.last, signers: command.signers })) {
+				if (
+					!validateCommit({ frame: command.frame, hanko: command.hanko, prev: replica.last, signers: command.signers })
+				) {
 					// Validation failed, replica will not apply this commit
 					return replica;
 				}
@@ -233,7 +255,7 @@ export const applyCommand = ({ replica, command }: ApplyCommandParams): Replica 
 		case 'IMPORT':
 			// IMPORT is handled at server level, not entity level
 			return replica;
-		
+
 		default: {
 			// Exhaustive check
 			// @ts-expect-error - exhaustive type check

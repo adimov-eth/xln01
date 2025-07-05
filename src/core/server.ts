@@ -1,15 +1,4 @@
-import {
-	Input,
-	Replica,
-	getAddrKey,
-	ServerFrame,
-	ServerState,
-	TS,
-	Hex,
-	Address,
-	Frame,
-	EntityState,
-} from '../types';
+import { Input, Replica, getAddrKey, ServerFrame, ServerState, TS, Hex, Address, Frame, EntityState } from '../types';
 import { applyCommand } from './entity';
 import { keccak_256 as keccak } from '@noble/hashes/sha3';
 import { encodeServerFrame } from '../codec/rlp';
@@ -62,12 +51,16 @@ export function applyServerBlock({ prev, batch, timestamp }: ApplyServerBlockPar
 			/* Determine routing key.
 			   If the command is entity-specific, route to the Replica that should handle it.
 			   We use addrKey (jurisdiction:entity) plus signer's address for uniqueness when needed. */
-			const signerPart = 
-				command.type === 'ADD_TX' ? command.tx.from :
-				command.type === 'SIGN' ? input.to : // Route to the proposer (recipient)
-				command.type === 'PROPOSE' ? input.from : // Use the sender as the proposer
-				command.type === 'COMMIT' ? input.to : // Route to the recipient
-				'';
+			const signerPart =
+				command.type === 'ADD_TX'
+					? command.tx.from
+					: command.type === 'SIGN'
+						? input.to // Route to the proposer (recipient)
+						: command.type === 'PROPOSE'
+							? input.from // Use the sender as the proposer
+							: command.type === 'COMMIT'
+								? input.to // Route to the recipient
+								: '';
 
 			const key = command.type === 'IMPORT' ? '' : command.addrKey + (signerPart ? ':' + signerPart : '');
 
@@ -76,13 +69,10 @@ export function applyServerBlock({ prev, batch, timestamp }: ApplyServerBlockPar
 				const baseReplica = command.replica;
 				const eKey = getAddrKey(baseReplica.address); // e.g. "demo:chat"
 				// Clone and insert one Replica per signer in the quorum (each signer gets its own replica state)
-				const newReplicas = Object.keys(baseReplica.last.state.quorum.members).reduce(
-					(reps, signerAddr) => {
-						const replicaCopy: Replica = { ...baseReplica, proposer: signerAddr as Address };
-						return new Map(reps).set(`${eKey}:${signerAddr}`, replicaCopy);
-					},
-					acc.finalReplicas
-				);
+				const newReplicas = Object.keys(baseReplica.last.state.quorum.members).reduce((reps, signerAddr) => {
+					const replicaCopy: Replica = { ...baseReplica, proposer: signerAddr as Address };
+					return new Map(reps).set(`${eKey}:${signerAddr}`, replicaCopy);
+				}, acc.finalReplicas);
 				return { finalReplicas: newReplicas, allOutbox: acc.allOutbox };
 			}
 
@@ -99,6 +89,11 @@ export function applyServerBlock({ prev, batch, timestamp }: ApplyServerBlockPar
 					case 'PROPOSE': {
 						if (!replica.proposal && updatedReplica.proposal) {
 							// Proposal just created: ask all signers (including proposer) to SIGN
+							// Safety check: ensure proposal actually exists before accessing properties
+							if (!updatedReplica.proposal.hash) {
+								console.error('FRAME_BUILD_ERR: Proposal created without hash');
+								return [];
+							}
 							return Object.keys(updatedReplica.last.state.quorum.members).map(s => ({
 								from: s as Address,
 								to: updatedReplica.proposer, // Send to proposer
@@ -121,6 +116,11 @@ export function applyServerBlock({ prev, batch, timestamp }: ApplyServerBlockPar
 							if (prevPower < q.threshold && newPower >= q.threshold) {
 								// Threshold just reached: proposer will broadcast COMMIT
 								// We need to send COMMIT to all replicas of this entity
+								// Safety check: ensure proposal exists before accessing properties
+								if (!updatedReplica.proposal) {
+									console.error('COMMIT_ERR: Proposal disappeared during SIGN processing');
+									return [];
+								}
 								return Object.keys(updatedReplica.last.state.quorum.members).map(signerAddr => ({
 									from: updatedReplica.proposer,
 									to: signerAddr as Address,
@@ -129,13 +129,13 @@ export function applyServerBlock({ prev, batch, timestamp }: ApplyServerBlockPar
 										addrKey: command.addrKey,
 										hanko: DUMMY_SIGNATURE as Hex,
 										frame: {
-											height: updatedReplica.proposal!.height,
-											ts: updatedReplica.proposal!.ts,
-											txs: updatedReplica.proposal!.txs,
-											state: updatedReplica.proposal!.state,
+											height: updatedReplica.proposal.height,
+											ts: updatedReplica.proposal.ts,
+											txs: updatedReplica.proposal.txs,
+											state: updatedReplica.proposal.state,
 										} as Frame<EntityState>,
 										signers: [], // Will be filled by runtime
-										_sigs: Object.fromEntries(updatedReplica.proposal!.sigs), // Pass sigs separately for runtime
+										_sigs: Object.fromEntries(updatedReplica.proposal.sigs), // Pass sigs separately for runtime
 									},
 								}));
 							}
@@ -146,11 +146,13 @@ export function applyServerBlock({ prev, batch, timestamp }: ApplyServerBlockPar
 						if (!updatedReplica.isAwaitingSignatures && updatedReplica.mempool.length) {
 							// After adding a tx, if not already proposing, trigger a PROPOSE on next tick
 							// The proposer's replica handles the PROPOSE, so we need to route to it
-							return [{
-								from: updatedReplica.proposer,
-								to: updatedReplica.proposer,
-								cmd: { type: 'PROPOSE' as const, addrKey: command.addrKey, ts: timestamp },
-							}];
+							return [
+								{
+									from: updatedReplica.proposer,
+									to: updatedReplica.proposer,
+									cmd: { type: 'PROPOSE' as const, addrKey: command.addrKey, ts: timestamp },
+								},
+							];
 						}
 						return [];
 					}
@@ -163,32 +165,37 @@ export function applyServerBlock({ prev, batch, timestamp }: ApplyServerBlockPar
 
 			return {
 				finalReplicas: updatedReplicas,
-				allOutbox: [...acc.allOutbox, ...newOutbox]
+				allOutbox: [...acc.allOutbox, ...newOutbox],
 			};
 		},
-		{ finalReplicas: new Map(prev.replicas), allOutbox: [] as Input[] }
+		{ finalReplicas: new Map(prev.replicas), allOutbox: [] as Input[] },
 	);
 
 	/* ─── After processing all inputs, build the ServerFrame for this tick ─── */
-	const newHeight = (prev.height + 1n);
+	const newHeight = prev.height + 1n;
 	const rootHash = computeRoot(finalReplicas); // Merkle root of all Entity states after this tick
 	const frame: ServerFrame = {
 		height: newHeight,
 		ts: timestamp,
 		inputs: batch,
 		root: rootHash,
-		hash: (HASH_HEX_PREFIX + Buffer.from(keccak(encodeServerFrame({
-			height: newHeight,
-			ts: timestamp,
-			inputs: batch,
-			root: rootHash,
-			hash: DUMMY_SIGNATURE as Hex,
-		}))).toString('hex')) as Hex,
+		hash: (HASH_HEX_PREFIX +
+			Buffer.from(
+				keccak(
+					encodeServerFrame({
+						height: newHeight,
+						ts: timestamp,
+						inputs: batch,
+						root: rootHash,
+						hash: DUMMY_SIGNATURE as Hex,
+					}),
+				),
+			).toString('hex')) as Hex,
 	};
 
-	return { 
-		state: { replicas: finalReplicas, height: newHeight }, 
-		frame, 
-		outbox: allOutbox 
+	return {
+		state: { replicas: finalReplicas, height: newHeight },
+		frame,
+		outbox: allOutbox,
 	};
 }

@@ -11,8 +11,18 @@ export type PrivKey = Uint8Array;
 export type PubKey = Uint8Array;
 
 export const randomPriv = (): PrivKey => bls.utils.randomPrivateKey();
-export const getPublicKey = (privateKey: PrivKey): PubKey => bls.getPublicKey(privateKey);
-export const deriveAddress = (publicKey: PubKey): Hex => {
+
+export interface GetPublicKeyParams {
+	privateKey: PrivKey;
+}
+
+export const getPublicKey = ({ privateKey }: GetPublicKeyParams): PubKey => bls.getPublicKey(privateKey);
+
+export interface DeriveAddressParams {
+	publicKey: PubKey;
+}
+
+export const deriveAddress = ({ publicKey }: DeriveAddressParams): Hex => {
 	const hash = keccak(publicKey);
 	return convertBytesToHex(hash.slice(-ADDRESS_LENGTH));
 	// take rightmost 20 bytes of keccak(pubkey) as address (ETH-style)
@@ -37,13 +47,17 @@ export interface VerifyAggregateParams {
 }
 
 /* ──────────── signatures ──────────── */
-export const sign = ({ message, privateKey }: SignParams): Hex => 
-	convertBytesToHex(bls.sign(message, privateKey));
+export const sign = ({ message, privateKey }: SignParams): Hex => convertBytesToHex(bls.sign(message, privateKey));
 
 export const verify = ({ message, signature, publicKey }: VerifyParams): boolean =>
 	bls.verify(convertHexToBytes(signature), message, publicKey);
 
-export const aggregate = (signatures: Hex[]): Hex => convertBytesToHex(bls.aggregateSignatures(signatures.map(convertHexToBytes)));
+export interface AggregateParams {
+	signatures: Hex[];
+}
+
+export const aggregate = ({ signatures }: AggregateParams): Hex =>
+	convertBytesToHex(bls.aggregateSignatures(signatures.map(convertHexToBytes)));
 
 export const verifyAggregate = ({ hanko, messageHash, publicKeys }: VerifyAggregateParams): boolean =>
 	bls.verifyBatch(
