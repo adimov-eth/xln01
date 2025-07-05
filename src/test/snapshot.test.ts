@@ -22,7 +22,7 @@ describe('XLN Consensus Snapshot Test', () => {
 			from: fromAddr,
 			body: { message: 'Test message' },
 			sig: DUMMY_SIGNATURE,
-		} as any;
+		} as Transaction;
 		
 		const msgToSign = Buffer.from(
 			JSON.stringify({
@@ -32,7 +32,7 @@ describe('XLN Consensus Snapshot Test', () => {
 				body: chatTx.body,
 			}),
 		);
-		chatTx.sig = await sign(msgToSign, privKey);
+		chatTx.sig = await sign({ message: msgToSign, privateKey: privKey });
 		
 		// Create ADD_TX input
 		const addTxInput: Input = {
@@ -42,22 +42,22 @@ describe('XLN Consensus Snapshot Test', () => {
 		};
 		
 		// Tick 1: Add transaction
-		const tick1Result = await runtime.tick(Date.now(), [addTxInput]);
+		const tick1Result = await runtime.tick({ now: Date.now(), incoming: [addTxInput] });
 		expect(tick1Result.outbox.length).toBe(1);
 		expect(tick1Result.outbox[0].cmd.type).toBe('PROPOSE');
 		
 		// Tick 2: Process PROPOSE
-		const tick2Result = await runtime.tick(Date.now() + 100, tick1Result.outbox);
+		const tick2Result = await runtime.tick({ now: Date.now() + 100, incoming: tick1Result.outbox });
 		expect(tick2Result.outbox.length).toBe(5); // One SIGN request per signer
 		expect(tick2Result.outbox.every(msg => msg.cmd.type === 'SIGN')).toBe(true);
 		
 		// Tick 3: Process SIGN commands
-		const tick3Result = await runtime.tick(Date.now() + 200, tick2Result.outbox);
+		const tick3Result = await runtime.tick({ now: Date.now() + 200, incoming: tick2Result.outbox });
 		expect(tick3Result.outbox.length).toBe(5); // One COMMIT per replica
 		expect(tick3Result.outbox.every(msg => msg.cmd.type === 'COMMIT')).toBe(true);
 		
 		// Tick 4: Process COMMIT
-		const tick4Result = await runtime.tick(Date.now() + 300, tick3Result.outbox);
+		const tick4Result = await runtime.tick({ now: Date.now() + 300, incoming: tick3Result.outbox });
 		expect(tick4Result.outbox.length).toBe(0); // No more messages
 		
 		// Verify final state

@@ -9,6 +9,8 @@ import {
 	DEMO_JURISDICTION,
 	DEMO_ENTITY_ID,
 	TICK_INTERVAL_MS,
+	DEMO_WAIT_MS,
+	HASH_DISPLAY_LENGTH,
 } from './constants';
 
 // Demo script showing the full consensus flow for a chat message
@@ -24,15 +26,15 @@ const DEMO_ADDRS = runtime.ADDRS;
 const DEMO_PRIVS = runtime.PRIVS;
 
 // Prepare a chat transaction from the first signer
-const fromAddr = DEMO_ADDRS[0];
-const privKey = DEMO_PRIVS[0];
+const fromAddr = DEMO_ADDRS[0]!; // We know we have 5 signers
+const privKey = DEMO_PRIVS[0]!; // We know we have 5 private keys
 const chatTx: Transaction = {
 	kind: 'chat',
 	nonce: INITIAL_HEIGHT,
 	from: fromAddr,
 	body: { message: 'Hello, XLN!' },
 	sig: DUMMY_SIGNATURE, // placeholder for now
-} as any;
+} as Transaction;
 
 (async () => {
 	console.log('=== XLN Chat Consensus Demo ===\n');
@@ -49,7 +51,7 @@ const chatTx: Transaction = {
 			body: chatTx.body,
 		}),
 	);
-	chatTx.sig = await sign(msgToSign, privKey);
+	chatTx.sig = await sign({ message: msgToSign, privateKey: privKey });
 
 	const addTxInput: Input = {
 		from: fromAddr,
@@ -61,22 +63,22 @@ const chatTx: Transaction = {
 	// and go directly to adding a transaction
 
 	console.log('Tick 1: Add transaction to mempool');
-	const { outbox: out1 } = await runtime.tick(Date.now() + TICK_INTERVAL_MS, [addTxInput]);
+	const { outbox: out1 } = await runtime.tick({ now: Date.now() + TICK_INTERVAL_MS, incoming: [addTxInput] });
 	console.log(`  → Generated ${out1.length} follow-up commands`);
 
 	console.log('\nTick 2: Process PROPOSE (creates frame)');
-	const { outbox: out2 } = await runtime.tick(Date.now() + TICK_INTERVAL_MS * 2, out1);
+	const { outbox: out2 } = await runtime.tick({ now: Date.now() + TICK_INTERVAL_MS * 2, incoming: out1 });
 	console.log(`  → Proposal created, requesting signatures from ${out2.length} signers`);
 
 	console.log('\nTick 3: Process SIGN commands (collect signatures)');
-	const { outbox: out3 } = await runtime.tick(Date.now() + TICK_INTERVAL_MS * 3, out2);
+	const { outbox: out3 } = await runtime.tick({ now: Date.now() + TICK_INTERVAL_MS * 3, incoming: out2 });
 	console.log(`  → ${out3.length} COMMIT commands generated`);
 
 	console.log('\nTick 4: Process COMMIT (finalize consensus)');
-	const { frame: finalFrame } = await runtime.tick(Date.now() + TICK_INTERVAL_MS * 4, out3);
+	const { frame: finalFrame } = await runtime.tick({ now: Date.now() + TICK_INTERVAL_MS * 4, incoming: out3 });
 
 	// Wait a moment for state to settle
-	await new Promise(resolve => setTimeout(resolve, 100));
+	await new Promise(resolve => setTimeout(resolve, DEMO_WAIT_MS));
 
 	console.log('\n=== CONSENSUS ACHIEVED ===');
 
@@ -89,7 +91,7 @@ const chatTx: Transaction = {
 	for (const [key, replica] of allReplicas) {
 		const chat = replica.last.state.chat;
 		// Custom replacer to handle BigInt serialization
-		const replacer = (key: string, value: any) => (typeof value === 'bigint' ? value.toString() : value);
+		const replacer = (_key: string, value: unknown) => (typeof value === 'bigint' ? value.toString() : value);
 		const stateHash = JSON.stringify(replica.last.state, replacer);
 
 		if (firstStateHash === null) {
@@ -102,8 +104,8 @@ const chatTx: Transaction = {
 		console.log(`    Height: ${replica.last.height}`);
 		console.log(`    Chat messages: ${chat.length}`);
 		if (chat.length > 0) {
-			chat.forEach((message: any, i: number) => {
-				console.log(`      ${i + 1}. "${message.msg}" (from ${message.from.slice(0, 10)}...)`);
+			chat.forEach((message, i) => {
+				console.log(`      ${i + 1}. "${message.msg}" (from ${message.from.slice(0, HASH_DISPLAY_LENGTH)}...)`);
 			});
 		}
 	}

@@ -1,8 +1,7 @@
 import {
 	Input,
 	Replica,
-	Command,
-	addrKey,
+	getAddrKey,
 	ServerFrame,
 	ServerState,
 	TS,
@@ -11,11 +10,12 @@ import {
 	UInt64,
 	Frame,
 	EntityState,
+	Quorum,
 } from '../types';
 import { applyCommand } from './entity';
 import { keccak_256 as keccak } from '@noble/hashes/sha3';
 import { encodeServerFrame } from '../codec/rlp';
-import { DUMMY_SIGNATURE, TICK_INTERVAL_MS, HASH_HEX_PREFIX } from '../constants';
+import { DUMMY_SIGNATURE, HASH_HEX_PREFIX } from '../constants';
 
 /* ──────────── RORO Pattern Types ──────────── */
 export interface ApplyServerBlockParams {
@@ -35,7 +35,7 @@ export interface ApplyServerBlockResult {
  *  (Here we just hash the JSON of all state snapshots; in future, use proper Merkle tree.) */
 const computeRoot = (replicas: Map<string, Replica>): Hex => {
 	// Custom replacer to handle BigInt serialization
-	const replacer = (key: string, value: any) => (typeof value === 'bigint' ? value.toString() : value);
+	const replacer = (_key: string, value: unknown) => (typeof value === 'bigint' ? value.toString() : value);
 
 	return (HASH_HEX_PREFIX +
 		Buffer.from(
@@ -49,7 +49,7 @@ const computeRoot = (replicas: Map<string, Replica>): Hex => {
 };
 
 /* ──────────── helper: trivial power calc (all shares = 1 in MVP) ──────────── */
-const power = (sigs: Map<Address, string>, q: any) => sigs.size; // in our genesis, each signer has 1 share
+const calculatePower = (signatures: Map<Address, string>, _quorum: Quorum) => signatures.size; // in our genesis, each signer has 1 share
 
 /* ──────────── Pure Server reducer (executed every ${TICK_INTERVAL_MS}ms tick) ──────────── */
 /**
@@ -60,23 +60,23 @@ export function applyServerBlock({ prev, batch, timestamp }: ApplyServerBlockPar
 	// Process all inputs and collect results
 	const { finalReplicas, allOutbox } = batch.reduce(
 		(acc, input) => {
-			const { cmd } = input;
+			const { cmd: command } = input;
 			/* Determine routing key.
 			   If the command is entity-specific, route to the Replica that should handle it.
 			   We use addrKey (jurisdiction:entity) plus signer's address for uniqueness when needed. */
 			const signerPart = 
-				cmd.type === 'ADD_TX' ? cmd.tx.from :
-				cmd.type === 'SIGN' ? input.to : // Route to the proposer (recipient)
-				cmd.type === 'PROPOSE' ? input.from : // Use the sender as the proposer
-				cmd.type === 'COMMIT' ? input.to : // Route to the recipient
+				command.type === 'ADD_TX' ? command.tx.from :
+				command.type === 'SIGN' ? input.to : // Route to the proposer (recipient)
+				command.type === 'PROPOSE' ? input.from : // Use the sender as the proposer
+				command.type === 'COMMIT' ? input.to : // Route to the recipient
 				'';
 
-			const key = cmd.type === 'IMPORT' ? '' : cmd.addrKey + (signerPart ? ':' + signerPart : '');
+			const key = command.type === 'IMPORT' ? '' : command.addrKey + (signerPart ? ':' + signerPart : '');
 
 			/* ─── IMPORT command (bootstrap a new Entity into server state) ─── */
-			if (cmd.type === 'IMPORT') {
-				const baseReplica = cmd.replica;
-				const eKey = addrKey(baseReplica.address); // e.g. "demo:chat"
+			if (command.type === 'IMPORT') {
+				const baseReplica = command.replica;
+				const eKey = getAddrKey(baseReplica.address); // e.g. "demo:chat"
 				// Clone and insert one Replica per signer in the quorum (each signer gets its own replica state)
 				const newReplicas = Object.keys(baseReplica.last.state.quorum.members).reduce(
 					(reps, signerAddr) => {
@@ -92,12 +92,12 @@ export function applyServerBlock({ prev, batch, timestamp }: ApplyServerBlockPar
 			if (!replica) return acc; // no replica found (shouldn't happen if IMPORT was done properly)
 
 			/* ─── Apply the Entity state machine ─── */
-			const updatedReplica = applyCommand({ replica, command: cmd });
+			const updatedReplica = applyCommand({ replica, command });
 			const updatedReplicas = new Map(acc.finalReplicas).set(key, updatedReplica);
 
 			/* ─── Deterministic post-effects: generate follow-up commands if needed ─── */
 			const newOutbox = (() => {
-				switch (cmd.type) {
+				switch (command.type) {
 					case 'PROPOSE': {
 						if (!replica.proposal && updatedReplica.proposal) {
 							// Proposal just created: ask all signers (including proposer) to SIGN
@@ -106,7 +106,7 @@ export function applyServerBlock({ prev, batch, timestamp }: ApplyServerBlockPar
 								to: updatedReplica.proposer, // Send to proposer
 								cmd: {
 									type: 'SIGN' as const,
-									addrKey: cmd.addrKey,
+									addrKey: command.addrKey,
 									signer: s as Address,
 									frameHash: updatedReplica.proposal.hash,
 									sig: DUMMY_SIGNATURE as Hex,
@@ -118,8 +118,8 @@ export function applyServerBlock({ prev, batch, timestamp }: ApplyServerBlockPar
 					case 'SIGN': {
 						if (updatedReplica.isAwaitingSignatures && updatedReplica.proposal) {
 							const q = updatedReplica.last.state.quorum;
-							const prevPower = replica.proposal ? power(replica.proposal.sigs, q) : 0;
-							const newPower = power(updatedReplica.proposal.sigs, q);
+							const prevPower = replica.proposal ? calculatePower(replica.proposal.sigs, q) : 0;
+							const newPower = calculatePower(updatedReplica.proposal.sigs, q);
 							if (prevPower < q.threshold && newPower >= q.threshold) {
 								// Threshold just reached: proposer will broadcast COMMIT
 								// We need to send COMMIT to all replicas of this entity
@@ -128,7 +128,7 @@ export function applyServerBlock({ prev, batch, timestamp }: ApplyServerBlockPar
 									to: signerAddr as Address,
 									cmd: {
 										type: 'COMMIT' as const,
-										addrKey: cmd.addrKey,
+										addrKey: command.addrKey,
 										hanko: DUMMY_SIGNATURE as Hex,
 										frame: {
 											height: updatedReplica.proposal!.height,
@@ -138,7 +138,7 @@ export function applyServerBlock({ prev, batch, timestamp }: ApplyServerBlockPar
 										} as Frame<EntityState>,
 										signers: [], // Will be filled by runtime
 										_sigs: Object.fromEntries(updatedReplica.proposal!.sigs), // Pass sigs separately for runtime
-									} as any,
+									},
 								}));
 							}
 						}
@@ -151,7 +151,7 @@ export function applyServerBlock({ prev, batch, timestamp }: ApplyServerBlockPar
 							return [{
 								from: updatedReplica.proposer,
 								to: updatedReplica.proposer,
-								cmd: { type: 'PROPOSE' as const, addrKey: cmd.addrKey, ts: timestamp },
+								cmd: { type: 'PROPOSE' as const, addrKey: command.addrKey, ts: timestamp },
 							}];
 						}
 						return [];

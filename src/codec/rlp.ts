@@ -1,7 +1,8 @@
 import * as rlp from 'rlp';
-import type { Frame, Transaction, TxKind, Input, Command, Hex, UInt64 } from '../types';
+import type { Frame, Transaction, TxKind, Input, Command, Hex, UInt64, Result } from '../types';
+import { ok, err } from '../types';
 import { keccak_256 as keccak } from '@noble/hashes/sha3';
-import { HASH_HEX_PREFIX, DUMMY_SIGNATURE } from '../constants';
+import { HASH_HEX_PREFIX, DUMMY_SIGNATURE, TRANSACTION_FIELD_COUNT, FRAME_FIELD_COUNT, COMMAND_FIELD_COUNT, INPUT_FIELD_COUNT, SERVER_FRAME_FIELD_COUNT, TIMESTAMP_BIGINT_THRESHOLD } from '../constants';
 
 /* — Type helpers for RLP operations — */
 type RLPDecodedValue = Buffer | RLPDecodedValue[];
@@ -9,166 +10,231 @@ type RLPDecodedValue = Buffer | RLPDecodedValue[];
 const isBuffer = (value: RLPDecodedValue): value is Buffer => 
 	Buffer.isBuffer(value);
 
-const asBuffer = (value: RLPDecodedValue): Buffer => {
+const asBuffer = (value: RLPDecodedValue): Result<Buffer> => {
 	if (!isBuffer(value)) {
-		throw new Error('Expected Buffer but got array');
+		return err('Expected Buffer but got array');
 	}
-	return value;
+	return ok(value);
 };
 
-const asBufferArray = (value: RLPDecodedValue): Buffer[] => {
-	if (isBuffer(value)) {
-		throw new Error('Expected array but got Buffer');
-	}
-	return value.map(asBuffer);
-};
+// Unused but kept for future use
+// const asBufferArray = (value: RLPDecodedValue): Result<Buffer[]> => {
+// 	if (isBuffer(value)) {
+// 		return err('Expected array but got Buffer');
+// 	}
+// 	const buffers: Buffer[] = [];
+// 	for (const item of value) {
+// 		const result = asBuffer(item);
+// 		if (!result.ok) return err(result.error);
+// 		buffers.push(result.value);
+// 	}
+// 	return ok(buffers);
+// };
 
 /* — internal helpers for bigint <-> Buffer — */
-const bnToBuf = (n: UInt64) => (n === 0n ? Buffer.alloc(0) : Buffer.from(n.toString(16).padStart(2, '0'), 'hex'));
-const bufToBn = (b: Buffer): UInt64 => (b.length === 0 ? 0n : BigInt('0x' + b.toString('hex')));
+const convertBigIntToBuffer = (number: UInt64) => (number === 0n ? Buffer.alloc(0) : Buffer.from(number.toString(16).padStart(2, '0'), 'hex'));
+const convertBufferToBigInt = (buffer: Buffer): UInt64 => (buffer.length === 0 ? 0n : BigInt('0x' + buffer.toString('hex')));
 
 /* — Transaction encode/decode — */
-export const encodeTx = (t: Transaction): Buffer =>
+export const encodeTransaction = (transaction: Transaction): Buffer =>
 	Buffer.from(
 		rlp.encode([
-			t.kind,
-			bnToBuf(t.nonce),
-			t.from,
-			JSON.stringify(t.body), // body is small JSON (e.g. {"message": "hi"})
-			t.sig,
+			transaction.kind,
+			convertBigIntToBuffer(transaction.nonce),
+			transaction.from,
+			JSON.stringify(transaction.body), // body is small JSON (e.g. {"message": "hi"})
+			transaction.sig,
 		]),
 	);
-export const decodeTx = (b: Buffer): Transaction => {
-	const decoded = rlp.decode(b) as RLPDecodedValue;
+export const decodeTransaction = (buffer: Buffer): Result<Transaction> => {
+	const decoded = rlp.decode(buffer) as RLPDecodedValue;
 	if (isBuffer(decoded)) {
-		throw new Error('Expected array for transaction');
+		return err('Expected array for transaction');
 	}
-	const [k, n, f, body, sig] = decoded.map(asBuffer);
-	return {
-		kind: k.toString() as TxKind,
-		nonce: bufToBn(n),
-		from: `${HASH_HEX_PREFIX}${f.toString('hex')}` as Hex,
-		body: JSON.parse(body.toString()) as { message: string },
-		sig: `${HASH_HEX_PREFIX}${sig.toString('hex')}` as Hex,
-	};
+	if (decoded.length !== TRANSACTION_FIELD_COUNT) {
+		return err(`Transaction must have exactly ${TRANSACTION_FIELD_COUNT} fields`);
+	}
+	
+	const results = [];
+	for (const item of decoded) {
+		const result = asBuffer(item);
+		if (!result.ok) return err(result.error);
+		results.push(result.value);
+	}
+	const [kind, nonce, from, body, sig] = results;
+	try {
+		return ok({
+			kind: kind.toString() as TxKind,
+			nonce: convertBufferToBigInt(nonce),
+			from: `${HASH_HEX_PREFIX}${from.toString('hex')}` as Hex,
+			body: JSON.parse(body.toString()) as { message: string },
+			sig: `${HASH_HEX_PREFIX}${sig.toString('hex')}` as Hex,
+		});
+	} catch (e) {
+		return err(`Failed to parse transaction: ${e}`);
+	}
 };
 
 /* — Entity Frame encode/decode — */
-export const encodeFrame = <S>(f: Frame<S>): Buffer =>
+export const encodeFrame = <S>(frame: Frame<S>): Buffer =>
 	Buffer.from(
 		rlp.encode([
-			bnToBuf(f.height),
-			f.ts,
-			f.txs.map(encodeTx),
-			rlp.encode(f.state), // state is encoded as RLP of its data structure
+			convertBigIntToBuffer(frame.height),
+			frame.ts,
+			frame.txs.map(encodeTransaction),
+			Buffer.from(JSON.stringify(frame.state)), // state is encoded as JSON for simplicity
 		]),
 	);
-export const decodeFrame = <S>(b: Buffer): Frame<S> => {
-	const decoded = rlp.decode(b) as RLPDecodedValue;
+export const decodeFrame = <S>(buffer: Buffer): Result<Frame<S>> => {
+	const decoded = rlp.decode(buffer) as RLPDecodedValue;
 	if (isBuffer(decoded)) {
-		throw new Error('Expected array for frame');
+		return err('Expected array for frame');
 	}
-	if (decoded.length !== 4) {
-		throw new Error('Invalid frame structure');
-	}
-	const h = asBuffer(decoded[0]);
-	const ts = asBuffer(decoded[1]);
-	const txs = decoded[2];
-	const st = asBuffer(decoded[3]);
-	
-	if (isBuffer(txs)) {
-		throw new Error('Expected array for transactions');
+	if (decoded.length !== FRAME_FIELD_COUNT) {
+		return err('Invalid frame structure');
 	}
 	
-	return {
-		height: bufToBn(h),
-		ts: Number(ts.toString()),
-		txs: txs.map(tx => decodeTx(asBuffer(tx))),
-		state: rlp.decode(st) as S,
-	};
+	const heightResult = asBuffer(decoded[0]);
+	const timestampResult = asBuffer(decoded[1]);
+	const stateResult = asBuffer(decoded[3]);
+	
+	if (!heightResult.ok) return err(heightResult.error);
+	if (!timestampResult.ok) return err(timestampResult.error);
+	if (!stateResult.ok) return err(stateResult.error);
+	
+	const transactions = decoded[2];
+	if (isBuffer(transactions)) {
+		return err('Expected array for transactions');
+	}
+	
+	const txs: Transaction[] = [];
+	for (const tx of transactions) {
+		const txBufferResult = asBuffer(tx);
+		if (!txBufferResult.ok) return err(txBufferResult.error);
+		const txResult = decodeTransaction(txBufferResult.value);
+		if (!txResult.ok) return err(txResult.error);
+		txs.push(txResult.value);
+	}
+	
+	try {
+		return ok({
+			height: convertBufferToBigInt(heightResult.value),
+			ts: Number(timestampResult.value.toString()),
+			txs,
+			state: rlp.decode(stateResult.value) as S,
+		});
+	} catch (e) {
+		return err(`Failed to decode frame: ${e}`);
+	}
 };
 
 /* — Command encode/decode (wrapped in Input) — */
-const encodeCommand = (c: Command): Buffer[] => {
+const encodeCommand = (command: Command): Buffer[] => {
 	// Custom replacer to handle BigInt serialization
 	const replacer = (_key: string, value: unknown) => 
 		typeof value === 'bigint' ? value.toString() : value;
-	return [Buffer.from(c.type), Buffer.from(JSON.stringify(c, replacer))];
+	return [Buffer.from(command.type), Buffer.from(JSON.stringify(command, replacer))];
 };
-const decodeCommand = (arr: RLPDecodedValue[]): Command => {
+const decodeCommand = (arr: RLPDecodedValue[]): Result<Command> => {
 	// Custom reviver to restore BigInt values
 	const reviver = (key: string, value: unknown) => {
 		// Detect numeric strings that should be BigInt (nonce, height, etc)
 		if (
 			typeof value === 'string' &&
 			/^\d+$/.test(value) &&
-			(key === 'nonce' || key === 'height' || (key === 'ts' && value.length > 15))
+			(key === 'nonce' || key === 'height' || (key === 'ts' && value.length > TIMESTAMP_BIGINT_THRESHOLD))
 		) {
 			return BigInt(value);
 		}
 		return value;
 	};
-	if (arr.length !== 2) {
-		throw new Error('Invalid command structure');
+	if (arr.length !== COMMAND_FIELD_COUNT) {
+		return err('Invalid command structure');
 	}
-	const cmdData = asBuffer(arr[1]);
-	return JSON.parse(cmdData.toString(), reviver) as Command;
+	const cmdDataResult = asBuffer(arr[1]);
+	if (!cmdDataResult.ok) return err(cmdDataResult.error);
+	
+	try {
+		return ok(JSON.parse(cmdDataResult.value.toString(), reviver) as Command);
+	} catch (e) {
+		return err(`Failed to parse command: ${e}`);
+	}
 };
 
 /* — Input (wire packet) encode/decode — */
-export const encodeInput = (i: Input): Buffer => Buffer.from(rlp.encode([i.from, i.to, encodeCommand(i.cmd)]));
-export const decodeInput = (b: Buffer): Input => {
-	const decoded = rlp.decode(b) as RLPDecodedValue;
+export const encodeInput = (input: Input): Buffer => Buffer.from(rlp.encode([input.from, input.to, encodeCommand(input.cmd)]));
+export const decodeInput = (buffer: Buffer): Result<Input> => {
+	const decoded = rlp.decode(buffer) as RLPDecodedValue;
 	if (isBuffer(decoded)) {
-		throw new Error('Expected array for input');
+		return err('Expected array for input');
 	}
-	if (decoded.length !== 3) {
-		throw new Error('Invalid input structure');
+	if (decoded.length !== INPUT_FIELD_COUNT) {
+		return err('Invalid input structure');
 	}
-	const from = asBuffer(decoded[0]);
-	const to = asBuffer(decoded[1]);
+	
+	const fromResult = asBuffer(decoded[0]);
+	const toResult = asBuffer(decoded[1]);
+	if (!fromResult.ok) return err(fromResult.error);
+	if (!toResult.ok) return err(toResult.error);
+	
 	const cmdArr = decoded[2];
-	
 	if (isBuffer(cmdArr)) {
-		throw new Error('Expected array for command');
+		return err('Expected array for command');
 	}
 	
-	return {
-		from: from.toString() as Hex,
-		to: to.toString() as Hex,
-		cmd: decodeCommand(cmdArr),
-	};
+	const cmdResult = decodeCommand(cmdArr);
+	if (!cmdResult.ok) return err(cmdResult.error);
+	
+	return ok({
+		from: fromResult.value.toString() as Hex,
+		to: toResult.value.toString() as Hex,
+		cmd: cmdResult.value,
+	});
 };
 
 /* — ServerFrame encode/decode — */
-export const encodeServerFrame = (f: import('../types').ServerFrame): Buffer =>
-	Buffer.from(rlp.encode([bnToBuf(f.height), f.ts, f.inputs.map(encodeInput), f.root]));
-export const decodeServerFrame = (b: Buffer): import('../types').ServerFrame => {
-	const decoded = rlp.decode(b) as RLPDecodedValue;
+export const encodeServerFrame = (frame: import('../types').ServerFrame): Buffer =>
+	Buffer.from(rlp.encode([convertBigIntToBuffer(frame.height), frame.ts, frame.inputs.map(encodeInput), frame.root]));
+export const decodeServerFrame = (buffer: Buffer): Result<import('../types').ServerFrame> => {
+	const decoded = rlp.decode(buffer) as RLPDecodedValue;
 	if (isBuffer(decoded)) {
-		throw new Error('Expected array for server frame');
+		return err('Expected array for server frame');
 	}
-	if (decoded.length !== 4) {
-		throw new Error('Invalid server frame structure');
+	if (decoded.length !== SERVER_FRAME_FIELD_COUNT) {
+		return err('Invalid server frame structure');
 	}
-	const h = asBuffer(decoded[0]);
-	const ts = asBuffer(decoded[1]);
-	const ins = decoded[2];
-	const root = asBuffer(decoded[3]);
+	const heightResult = asBuffer(decoded[0]);
+	const timestampResult = asBuffer(decoded[1]);
+	const inputs = decoded[2];
+	const rootResult = asBuffer(decoded[3]);
 	
-	if (isBuffer(ins)) {
-		throw new Error('Expected array for inputs');
+	if (!heightResult.ok) return err(heightResult.error);
+	if (!timestampResult.ok) return err(timestampResult.error);
+	if (!rootResult.ok) return err(rootResult.error);
+	
+	if (isBuffer(inputs)) {
+		return err('Expected array for inputs');
+	}
+	
+	// First decode all inputs, handling errors
+	const decodedInputs: Input[] = [];
+	for (const input of inputs) {
+		const inputBufferResult = asBuffer(input);
+		if (!inputBufferResult.ok) return err(inputBufferResult.error);
+		const inputResult = decodeInput(inputBufferResult.value);
+		if (!inputResult.ok) return err(inputResult.error);
+		decodedInputs.push(inputResult.value);
 	}
 	
 	const frameWithoutHash: import('../types').ServerFrame = {
-		height: bufToBn(h),
-		ts: Number(ts.toString()),
-		inputs: ins.map(input => decodeInput(asBuffer(input))),
-		root: `${HASH_HEX_PREFIX}${root.toString('hex')}` as Hex,
+		height: convertBufferToBigInt(heightResult.value),
+		ts: Number(timestampResult.value.toString()),
+		inputs: decodedInputs,
+		root: `${HASH_HEX_PREFIX}${rootResult.value.toString('hex')}` as Hex,
 		hash: DUMMY_SIGNATURE as Hex,
 	};
-	return {
+	return ok({
 		...frameWithoutHash,
 		hash: (HASH_HEX_PREFIX + Buffer.from(keccak(encodeServerFrame(frameWithoutHash))).toString('hex')) as Hex,
-	};
+	});
 };

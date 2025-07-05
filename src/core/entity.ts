@@ -1,4 +1,4 @@
-import { Replica, Command, EntityState, Frame, Transaction, Quorum, ProposedFrame, Address, Hex, TS } from '../types';
+import { Replica, Command, EntityState, Frame, Transaction, Quorum, ProposedFrame, Address, Hex, TS, Result, ok, err } from '../types';
 import { keccak_256 as keccak } from '@noble/hashes/sha3';
 import { verifyAggregate, PubKey } from '../crypto/bls';
 import { ADDR_TO_PUB } from './runtime';
@@ -31,24 +31,25 @@ export interface ApplyCommandParams {
 
 /* ──────────── frame hashing ──────────── */
 /** Compute canonical hash of a frame's content using keccak256. */
-export const hashFrame = (f: Frame<any>): Hex => {
+export const hashFrame = <T>(frame: Frame<T>): Hex => {
 	// Custom replacer to handle BigInt serialization
-	const replacer = (key: string, value: any) => (typeof value === 'bigint' ? value.toString() : value);
+	const replacer = (_key: string, value: unknown) => (typeof value === 'bigint' ? value.toString() : value);
 
-	return (HASH_HEX_PREFIX + Buffer.from(keccak(JSON.stringify(f, replacer))).toString('hex')) as Hex;
-	// TODO: switch to keccak(encFrame(f)) for canonical hashing once codec is stable
+	return (HASH_HEX_PREFIX + Buffer.from(keccak(JSON.stringify(frame, replacer))).toString('hex')) as Hex;
+	// TODO: switch to keccak(encFrame(frame)) for canonical hashing once codec is stable
 };
 
 /* ──────────── internal helpers ──────────── */
-const sortTx = (a: Transaction, b: Transaction) =>
+const sortTransaction = (a: Transaction, b: Transaction) =>
 	a.nonce !== b.nonce ? (a.nonce < b.nonce ? -1 : 1) : a.from !== b.from ? (a.from < b.from ? -1 : 1) : 0;
 
-const sharesOf = (addr: Address, q: Quorum) => q.members[addr]?.shares ?? 0;
+const getSharesOf = (address: Address, quorum: Quorum) => quorum.members[address]?.shares ?? 0;
 
-const power = (sigs: Map<Address, Hex>, q: Quorum) =>
-	[...sigs.keys()].reduce((sum, addr) => sum + sharesOf(addr, q), 0);
+const calculatePower = (signatures: Map<Address, Hex>, quorum: Quorum) =>
+	[...signatures.keys()].reduce((sum, address) => sum + getSharesOf(address, quorum), 0);
 
-const thresholdReached = (sigs: Map<Address, Hex>, q: Quorum) => power(sigs, q) >= q.threshold;
+// Currently unused but kept for clarity
+// const isThresholdReached = (signatures: Map<Address, Hex>, quorum: Quorum) => calculatePower(signatures, quorum) >= quorum.threshold;
 
 /* ──────────── commit validation ──────────── */
 /** Validate an incoming COMMIT frame against our current state */
@@ -61,7 +62,11 @@ const validateCommit = ({ frame, hanko, prev, signers }: ValidateCommitParams): 
 	}
 
 	// Replay transactions to verify state
-	const replay = execFrame({ prev, transactions: frame.txs, timestamp: frame.ts });
+	const replayResult = execFrame({ prev, transactions: frame.txs, timestamp: frame.ts });
+	if (!replayResult.ok) {
+		return false;
+	}
+	const replay = replayResult.value;
 
 	// Compare the replayed state hash with the frame's state hash
 	const replayStateHash = hashFrame(replay);
@@ -73,7 +78,7 @@ const validateCommit = ({ frame, hanko, prev, signers }: ValidateCommitParams): 
 	// Verify BLS aggregate signature (skip if DEV flag set)
 	if (!process.env.DEV_SKIP_SIGS) {
 		// Check we have enough signers for threshold
-		const totalPower = signers.reduce((sum, signer) => sum + sharesOf(signer, quorum), 0);
+		const totalPower = signers.reduce((sum, signer) => sum + getSharesOf(signer, quorum), 0);
 		if (totalPower < quorum.threshold) {
 			console.error(`Insufficient signing power: ${totalPower} < ${quorum.threshold}`);
 			return false;
@@ -97,7 +102,7 @@ const validateCommit = ({ frame, hanko, prev, signers }: ValidateCommitParams): 
 		const frameHash = hashFrame(frame);
 
 		try {
-			const isValid = verifyAggregate(hanko, frameHash, pubKeys);
+			const isValid = verifyAggregate({ hanko, messageHash: frameHash, publicKeys: pubKeys });
 			if (!isValid) {
 				// BLS signature verification failed
 				return false;
@@ -113,49 +118,51 @@ const validateCommit = ({ frame, hanko, prev, signers }: ValidateCommitParams): 
 
 /* ──────────── domain-specific state transition (chat) ──────────── */
 /** Apply a single chat transaction to the entity state (assuming nonce and membership are valid). */
-export const applyTx = ({ state, transaction, timestamp }: ApplyTxParams): EntityState => {
+export const applyTx = ({ state, transaction, timestamp }: ApplyTxParams): Result<EntityState> => {
 	const tx = transaction; // Keep using tx for brevity
-	const st = state; // Keep using st for brevity
-	if (tx.kind !== 'chat') throw new Error('Unknown tx kind');
-	const rec = st.quorum.members[tx.from];
-	if (!rec) throw new Error('Signer not in quorum');
-	if (tx.nonce !== rec.nonce) throw new Error('Bad nonce'); // stale or duplicate tx
+	if (tx.kind !== 'chat') return err('Unknown tx kind');
+	const record = state.quorum.members[tx.from];
+	if (!record) return err('Signer not in quorum');
+	if (tx.nonce !== record.nonce) return err('Bad nonce'); // stale or duplicate tx
 
 	// Update the signer's nonce (consume one nonce) and append chat message
 	const updatedMembers = {
-		...st.quorum.members,
-		[tx.from]: { nonce: rec.nonce + 1n, shares: rec.shares },
+		...state.quorum.members,
+		[tx.from]: { nonce: record.nonce + 1n, shares: record.shares },
 	};
-	return {
-		quorum: { ...st.quorum, members: updatedMembers },
-		chat: [...st.chat, { from: tx.from, msg: tx.body.message, ts: timestamp }],
-	};
+	return ok({
+		quorum: { ...state.quorum, members: updatedMembers },
+		chat: [...state.chat, { from: tx.from, msg: tx.body.message, ts: timestamp }],
+	});
 };
 
 /** Execute a batch of transactions on the previous frame's state to produce a new Frame. */
-export const execFrame = ({ prev, transactions, timestamp }: ExecFrameParams): Frame<EntityState> => {
+export const execFrame = ({ prev, transactions, timestamp }: ExecFrameParams): Result<Frame<EntityState>> => {
 	const txs = transactions; // Keep using txs for brevity
-	const orderedTxs = txs.slice().sort(sortTx);
-	const newState = orderedTxs.reduce(
-		(state, tx) => applyTx({ state, transaction: tx, timestamp }),
-		prev.state
-	);
-	return {
+	const orderedTxs = txs.slice().sort(sortTransaction);
+	
+	// Apply transactions, propagating errors
+	let currentState = prev.state;
+	for (const tx of orderedTxs) {
+		const result = applyTx({ state: currentState, transaction: tx, timestamp });
+		if (!result.ok) return err(result.error);
+		currentState = result.value;
+	}
+	return ok({
 		height: prev.height + 1n,
 		ts: timestamp,
 		txs: orderedTxs,
-		state: newState,
-	};
+		state: currentState,
+	});
 };
 
 /* ──────────── Entity consensus state machine (pure function) ──────────── */
 /** Apply a high-level command to a replica's state. Returns a new Replica state (no mutation). */
 export const applyCommand = ({ replica, command }: ApplyCommandParams): Replica => {
-	const cmd = command; // Keep using cmd for brevity
-	switch (cmd.type) {
+	switch (command.type) {
 		case 'ADD_TX': {
 			// Add a new transaction to the mempool (no immediate state change)
-			return { ...replica, mempool: [...replica.mempool, cmd.tx] };
+			return { ...replica, mempool: [...replica.mempool, command.tx] };
 		}
 
 		case 'PROPOSE': {
@@ -163,7 +170,11 @@ export const applyCommand = ({ replica, command }: ApplyCommandParams): Replica 
 				return replica; // nothing to do (either already proposing or no tx to propose)
 			}
 			// Build a new frame from current mempool transactions
-			const frame = execFrame({ prev: replica.last, transactions: replica.mempool, timestamp: cmd.ts });
+			const frameResult = execFrame({ prev: replica.last, transactions: replica.mempool, timestamp: command.ts });
+			if (!frameResult.ok) {
+				return replica; // Failed to build frame, keep current state
+			}
+			const frame = frameResult.value;
 			const proposal: ProposedFrame<EntityState> = {
 				...frame,
 				hash: hashFrame(frame),
@@ -179,11 +190,11 @@ export const applyCommand = ({ replica, command }: ApplyCommandParams): Replica 
 
 		case 'SIGN': {
 			if (!replica.isAwaitingSignatures || !replica.proposal) return replica;
-			if (cmd.frameHash !== replica.proposal.hash) return replica; // frame mismatch
-			if (!replica.last.state.quorum.members[cmd.signer]) return replica; // signer not in quorum
-			if (replica.proposal.sigs.has(cmd.signer)) return replica; // signer already signed
+			if (command.frameHash !== replica.proposal.hash) return replica; // frame mismatch
+			if (!replica.last.state.quorum.members[command.signer]) return replica; // signer not in quorum
+			if (replica.proposal.sigs.has(command.signer)) return replica; // signer already signed
 			// Accept this signer's signature for the proposal
-			const newSigs = new Map(replica.proposal.sigs).set(cmd.signer, cmd.sig);
+			const newSigs = new Map(replica.proposal.sigs).set(command.signer, command.sig);
 			return { ...replica, proposal: { ...replica.proposal, sigs: newSigs } };
 		}
 
@@ -192,22 +203,22 @@ export const applyCommand = ({ replica, command }: ApplyCommandParams): Replica 
 
 			// 1. Validate frame & Hanko against our own last state
 			try {
-				if (!validateCommit({ frame: cmd.frame, hanko: cmd.hanko, prev: replica.last, signers: cmd.signers })) {
+				if (!validateCommit({ frame: command.frame, hanko: command.hanko, prev: replica.last, signers: command.signers })) {
 					// Validation failed, replica will not apply this commit
 					return replica;
 				}
 			} catch (e) {
 				console.error('COMMIT validation error:', e);
-				return rep;
+				return replica;
 			}
 
 			// 2. Drop txs that were just committed
-			const newMempool = replica.mempool.filter(tx => !cmd.frame.txs.some(c => c.sig === tx.sig));
+			const newMempool = replica.mempool.filter(tx => !command.frame.txs.some(c => c.sig === tx.sig));
 
 			// 3. Adopt the new state
 			return {
 				...replica,
-				last: cmd.frame,
+				last: command.frame,
 				mempool: newMempool,
 				isAwaitingSignatures: false,
 				proposal: undefined,

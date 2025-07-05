@@ -9,7 +9,17 @@
 		"skipLibCheck": true,
 		"forceConsistentCasingInFileNames": true,
 		"resolveJsonModule": true,
-		"types": ["bun-types"]
+		"types": ["bun-types"],
+		
+		/* Additional strict checks as per codestyle.md */
+		"exactOptionalPropertyTypes": false, // Too restrictive for current codebase
+		"noUncheckedIndexedAccess": false, // Requires extensive refactoring
+		"noPropertyAccessFromIndexSignature": false, // Not practical for env vars
+		"useDefineForClassFields": true,
+		"noImplicitReturns": true,
+		"noFallthroughCasesInSwitch": true,
+		"noUnusedLocals": true,
+		"noUnusedParameters": true
 	},
 	"include": ["src/**/*"],
 	"exclude": ["node_modules"]

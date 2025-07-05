@@ -1,6 +1,6 @@
 import { applyServerBlock } from './server';
-import { sign, aggregate, randomPriv, pub, addr, PubKey } from '../crypto/bls';
-import { Input, Replica, Frame, EntityState, Quorum, Hex, Address } from '../types';
+import { sign, aggregate, randomPriv, getPublicKey, deriveAddress, PubKey } from '../crypto/bls';
+import { Input, Replica, Frame, EntityState, Quorum, Hex, Address, ServerFrame } from '../types';
 import {
 	TOTAL_SIGNERS,
 	QUORUM_THRESHOLD,
@@ -10,12 +10,14 @@ import {
 	INITIAL_HEIGHT,
 	DUMMY_SIGNATURE,
 	BLS_SIGNATURE_LENGTH,
+	HEX_PREFIX_LENGTH,
+	HASH_DISPLAY_LENGTH,
 } from '../constants';
 
 /* ──────────── Deterministic demo key generation (5 signers) ──────────── */
 const PRIVS = Array.from({ length: TOTAL_SIGNERS }, () => randomPriv());
-const PUBS = PRIVS.map(pub);
-const ADDRS = PUBS.map(addr);
+const PUBS = PRIVS.map(getPublicKey);
+const ADDRS = PUBS.map(deriveAddress);
 
 // Create a mapping from address to public key for signature verification
 export const ADDR_TO_PUB = new Map<string, PubKey>(
@@ -26,7 +28,7 @@ export const ADDR_TO_PUB = new Map<string, PubKey>(
 const genesisEntity = (): Replica => {
 	const quorum: Quorum = {
 		threshold: QUORUM_THRESHOLD,
-		members: Object.fromEntries(ADDRS.map(a => [a, { nonce: INITIAL_HEIGHT, shares: DEFAULT_SHARES_PER_SIGNER }])),
+		members: Object.fromEntries(ADDRS.map(address => [address, { nonce: INITIAL_HEIGHT, shares: DEFAULT_SHARES_PER_SIGNER }])),
 	};
 	const initState: EntityState = { quorum, chat: [] };
 	const initFrame: Frame<EntityState> = { height: INITIAL_HEIGHT, ts: 0, txs: [], state: initState };
@@ -40,11 +42,21 @@ const genesisEntity = (): Replica => {
 	};
 };
 
+export interface TickParams {
+	now: number;
+	incoming: Input[];
+}
+
+export interface TickResult {
+	outbox: Input[];
+	frame: ServerFrame;
+}
+
 export interface Runtime {
 	readonly ADDRS: readonly string[];
 	readonly PRIVS: readonly Hex[];
 	debugReplicas(): Map<string, Replica>;
-	tick(now: number, incoming: Input[]): Promise<{ outbox: Input[]; frame: any }>;
+	tick(params: TickParams): Promise<TickResult>;
 }
 
 export const createRuntime = (): Runtime => {
@@ -69,7 +81,7 @@ export const createRuntime = (): Runtime => {
 	};
 
 	/** Drive one 100ms tick of the server. Provide current time and any incoming Inputs. */
-	const tick = async (now: number, incoming: Input[]) => {
+	const tick = async ({ now, incoming }: TickParams): Promise<TickResult> => {
 		// Step 1: apply the pure server logic to get the next state and ServerFrame
 		const { state: nextState, frame, outbox } = applyServerBlock({
 			prev: currentState,
@@ -79,64 +91,67 @@ export const createRuntime = (): Runtime => {
 
 		// Step 2: fulfill signature placeholders in outbox (where private keys are used)
 		const fulfilledOutbox = await Promise.all(
-			outbox.map(async msg => {
-				if (msg.cmd.type === 'SIGN' && msg.cmd.sig === DUMMY_SIGNATURE) {
+			outbox.map(async message => {
+				if (message.cmd.type === 'SIGN' && message.cmd.sig === DUMMY_SIGNATURE) {
 					// Sign the frame hash with the signer's private key
-					const signerIndex = ADDRS.findIndex(a => a === msg.cmd.signer);
-					const signature = await sign(Buffer.from(msg.cmd.frameHash.slice(2), 'hex'), PRIVS[signerIndex]);
+					const signerIndex = ADDRS.findIndex(address => address === message.cmd.signer);
+					const signature = await sign({ 
+						message: Buffer.from(message.cmd.frameHash.slice(HEX_PREFIX_LENGTH), 'hex'), 
+						privateKey: PRIVS[signerIndex] 
+					});
 					return {
-						...msg,
-						cmd: { ...msg.cmd, sig: signature }
+						...message,
+						cmd: { ...message.cmd, sig: signature }
 					};
 				}
-				if (msg.cmd.type === 'COMMIT' && msg.cmd.hanko === DUMMY_SIGNATURE) {
+				if (message.cmd.type === 'COMMIT' && message.cmd.hanko === DUMMY_SIGNATURE) {
 					// Aggregate all collected signatures into one Hanko
-					const cmdWithSigs = msg.cmd as typeof msg.cmd & { _sigs?: Map<Address, Hex> | Record<string, Hex> };
-					const sigs = cmdWithSigs._sigs;
+					const commandWithSignatures = message.cmd as typeof message.cmd & { _sigs?: Map<Address, Hex> | Record<string, Hex> };
+					const signatures = commandWithSignatures._sigs;
 					
 					// Handle both Map and object representations
-					const realSigs: Hex[] = sigs instanceof Map
-						? [...sigs.values()].filter(sig => sig !== DUMMY_SIGNATURE) as Hex[]
-						: (sigs && typeof sigs === 'object')
-						? Object.values(sigs).filter((sig: any) => sig !== DUMMY_SIGNATURE) as Hex[]
+					const realSignatures: Hex[] = signatures instanceof Map
+						? [...signatures.values()].filter(sig => sig !== DUMMY_SIGNATURE) as Hex[]
+						: (signatures && typeof signatures === 'object')
+						? Object.values(signatures).filter((sig): sig is Hex => typeof sig === 'string' && sig !== DUMMY_SIGNATURE)
 						: [];
 
-					if (realSigs.length > 0) {
+					if (realSignatures.length > 0) {
 						// Get the list of signers who actually signed
 						const signers: Address[] =
-							sigs instanceof Map
-								? [...sigs.entries()].filter(([_, sig]) => sig !== DUMMY_SIGNATURE).map(([addr, _]) => addr as Address)
-								: Object.entries(sigs)
+							signatures instanceof Map
+								? [...signatures.entries()].filter(([_, sig]) => sig !== DUMMY_SIGNATURE).map(([address, _]) => address as Address)
+								: Object.entries(signatures)
 										.filter(([_, sig]) => sig !== DUMMY_SIGNATURE)
-										.map(([addr, _]) => addr as Address);
+										.map(([address, _]) => address as Address);
 
-						const hanko = aggregate(realSigs);
+						const hanko = aggregate(realSignatures);
 						
 						// Create new command without _sigs field
-						const { _sigs, ...cmdWithoutSigs } = cmdWithSigs;
+						const { _sigs, ...commandWithoutSignatures } = commandWithSignatures;
 						return {
-							...msg,
-							cmd: { ...cmdWithoutSigs, hanko, signers }
+							...message,
+							cmd: { ...commandWithoutSignatures, hanko, signers }
 						};
 					} else {
 						// This should not happen in normal operation
 						console.error('WARNING: No signatures found for aggregation');
 						const hanko = ('0x' + '00'.repeat(BLS_SIGNATURE_LENGTH)) as Hex;
-						const { _sigs, ...cmdWithoutSigs } = cmdWithSigs;
+						const { _sigs, ...commandWithoutSignatures } = commandWithSignatures;
 						return {
-							...msg,
-							cmd: { ...cmdWithoutSigs, hanko, signers: [] }
+							...message,
+							cmd: { ...commandWithoutSignatures, hanko, signers: [] }
 						};
 					}
 				}
-				return msg;
+				return message;
 			}),
 		);
 
 		// Step 3: (Placeholder for actual networking/persistence)
 		// For now, just log the ServerFrame and update state.
 		console.log(
-			`Committed ServerFrame #${frame.height.toString()} – hash: ${frame.hash.slice(0, 10)}... root: ${frame.root.slice(0, 10)}...`,
+			`Committed ServerFrame #${frame.height.toString()} – hash: ${frame.hash.slice(0, HASH_DISPLAY_LENGTH)}... root: ${frame.root.slice(0, HASH_DISPLAY_LENGTH)}...`,
 		);
 
 		// In a real node, here we would:

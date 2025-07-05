@@ -60,7 +60,7 @@ export interface ReplicaAddr {
 	entityId: string;
 	signerId?: string; // optional: identifies a particular signer's replica
 }
-export const addrKey = (a: ReplicaAddr) => `${a.jurisdiction}:${a.entityId}`; // canonical key for an entity (excludes signerId)
+export const getAddrKey = (a: ReplicaAddr) => `${a.jurisdiction}:${a.entityId}`; // canonical key for an entity (excludes signerId)
 
 /* ──────────── replica runtime view ──────────── */
 export interface Replica {

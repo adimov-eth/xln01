@@ -223,3 +223,4 @@ When implementing tests:
 - remember this
 - we use bun not pnpm
 - Codestyle guidelines added to highlight mission, influences, and detailed TypeScript practices
+- we agreed that tx for transactions are ok shortcut accepted in crypto community

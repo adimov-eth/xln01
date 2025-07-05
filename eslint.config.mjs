@@ -45,9 +45,9 @@ export default [
 			'fp/no-nil': 'off', // Allow null/undefined
 			'fp/no-unused-expression': 'off', // Conflicts with TS
 
-			// Disable some conflicting rules
-			'@typescript-eslint/no-explicit-any': 'off', // Used in some type tricks
-			'@typescript-eslint/no-non-null-assertion': 'off', // Sometimes necessary
+			// Enforce stricter type safety
+			'@typescript-eslint/no-explicit-any': 'error',
+			'@typescript-eslint/no-non-null-assertion': 'warn', // Sometimes necessary but should be avoided
 
 			// Async/await best practices
 			'@typescript-eslint/no-floating-promises': 'error',
