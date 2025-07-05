@@ -163,41 +163,50 @@ export function applyServerBlock({ prev, batch, timestamp }: ApplyServerBlockPar
 	);
 
 	/* ─── Generate PROPOSE commands for entities with pending transactions ─── */
-	const proposeEntries: Array<[string, Input]> = [];
-	
-	finalReplicas.forEach((replica, key) => {
-		const entityKey = replica.address.jurisdiction + ':' + replica.address.entityId;
-		
-		// Only process each entity once, and only if it's the proposer's replica
-		if (key.endsWith(':' + replica.proposer) &&
-		    !replica.isAwaitingSignatures && 
-		    replica.mempool.length > 0) {
-			
-			proposeEntries.push([entityKey, {
-				from: replica.proposer,
-				to: replica.proposer,
-				cmd: {
-					type: 'PROPOSE' as const,
-					addrKey: entityKey,
-					ts: timestamp,
-				},
-			}]);
-		}
-	});
-	
+	const proposeEntries = Array.from(finalReplicas.entries()).reduce<Array<[string, Input]>>(
+		(entries, [key, replica]) => {
+			const entityKey = replica.address.jurisdiction + ':' + replica.address.entityId;
+
+			// Only process each entity once, and only if it's the proposer's replica
+			if (key.endsWith(':' + replica.proposer) && !replica.isAwaitingSignatures && replica.mempool.length > 0) {
+				return [
+					...entries,
+					[
+						entityKey,
+						{
+							from: replica.proposer,
+							to: replica.proposer,
+							cmd: {
+								type: 'PROPOSE' as const,
+								addrKey: entityKey,
+								ts: timestamp,
+							},
+						},
+					],
+				];
+			}
+			return entries;
+		},
+		[],
+	);
+
 	// Filter to unique entities and extract commands
-	const seenEntities = new Set<string>();
-	const proposeCommands = proposeEntries
-		.filter(([entityKey]) => {
-			if (seenEntities.has(entityKey)) return false;
-			seenEntities.add(entityKey);
-			return true;
-		})
-		.map(([, input]) => input);
-	
+	const proposeCommands = proposeEntries.reduce<{ seen: string[]; commands: Input[] }>(
+		(acc, [entityKey, input]) => {
+			if (acc.seen.includes(entityKey)) {
+				return acc;
+			}
+			return {
+				seen: [...acc.seen, entityKey],
+				commands: [...acc.commands, input],
+			};
+		},
+		{ seen: [], commands: [] },
+	).commands;
+
 	// Add PROPOSE commands to outbox
 	const finalOutbox = [...allOutbox, ...proposeCommands];
-	
+
 	/* ─── After processing all inputs, build the ServerFrame for this tick ─── */
 	const newHeight = prev.height + 1n;
 	const rootHash = computeRoot(finalReplicas); // Merkle root of all Entity states after this tick

@@ -57,7 +57,7 @@ export const hashFrame = <T>(frame: Frame<T>): Hex => {
 const sortTransaction = (a: Transaction, b: Transaction) =>
 	a.nonce !== b.nonce ? (a.nonce < b.nonce ? -1 : 1) : a.from !== b.from ? (a.from < b.from ? -1 : 1) : 0;
 
-const getSharesOf = (address: Address, quorum: Quorum) => quorum.members[address]?.shares ?? 0n;
+const getSharesOf = (address: Address, quorum: Quorum): bigint => quorum.members[address]?.shares ?? 0n;
 
 // Currently unused but kept for clarity
 // const calculatePower = (signatures: Map<Address, Hex>, quorum: Quorum) =>
@@ -88,42 +88,40 @@ const validateCommit = ({ frame, hanko, prev, signers }: ValidateCommitParams): 
 		return false;
 	}
 
-	// Verify BLS aggregate signature (skip if DEV flag set)
-	if (!process.env.DEV_SKIP_SIGS) {
-		// Check we have enough signers for threshold
-		const totalPower = signers.reduce((sum: bigint, signer) => sum + getSharesOf(signer, quorum), 0n);
-		if (totalPower < quorum.threshold) {
-			console.error(`Insufficient signing power: ${totalPower} < ${quorum.threshold}`);
+	// Verify BLS aggregate signature
+	// Check we have enough signers for threshold
+	const totalPower = signers.reduce<bigint>((sum, signer) => sum + getSharesOf(signer, quorum), 0n);
+	if (totalPower < quorum.threshold) {
+		console.error(`Insufficient signing power: ${totalPower} < ${quorum.threshold}`);
+		return false;
+	}
+
+	// Get public keys only for signers who signed
+	const pubKeys = signers.reduce((keys: PubKey[], addr) => {
+		const pubKey = ADDR_TO_PUB.get(addr);
+		if (!pubKey) {
+			console.error(`No public key found for signer ${addr}`);
+			return keys;
+		}
+		return [...keys, pubKey];
+	}, []);
+
+	// Check if we got all required public keys
+	if (pubKeys.length !== signers.length) {
+		return false;
+	}
+
+	const frameHash = hashFrame(frame);
+
+	try {
+		const isValid = verifyAggregate({ hanko, messageHash: frameHash, publicKeys: pubKeys });
+		if (!isValid) {
+			// BLS signature verification failed
 			return false;
 		}
-
-		// Get public keys only for signers who signed
-		const pubKeys = signers.reduce((keys: PubKey[], addr) => {
-			const pubKey = ADDR_TO_PUB.get(addr);
-			if (!pubKey) {
-				console.error(`No public key found for signer ${addr}`);
-				return keys;
-			}
-			return [...keys, pubKey];
-		}, []);
-
-		// Check if we got all required public keys
-		if (pubKeys.length !== signers.length) {
-			return false;
-		}
-
-		const frameHash = hashFrame(frame);
-
-		try {
-			const isValid = verifyAggregate({ hanko, messageHash: frameHash, publicKeys: pubKeys });
-			if (!isValid) {
-				// BLS signature verification failed
-				return false;
-			}
-		} catch (e) {
-			console.error('BLS verification error:', e);
-			return false;
-		}
+	} catch (e) {
+		console.error('BLS verification error:', e);
+		return false;
 	}
 
 	return true;
