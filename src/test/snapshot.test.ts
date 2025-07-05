@@ -3,36 +3,35 @@ import { sign } from '../crypto/bls';
 import { Input, Transaction } from '../types';
 import {
 	INITIAL_HEIGHT,
-	DUMMY_SIGNATURE,
 	DEMO_JURISDICTION,
 	DEMO_ENTITY_ID,
 } from '../constants';
 
 describe('XLN Consensus Snapshot Test', () => {
-	test('single tick happy path produces expected state', async () => {
+	test('single tick happy path produces expected state', () => {
 		// Initialize runtime
 		const runtime = createRuntime();
 		const fromAddr = runtime.ADDRS[0];
 		const privKey = runtime.PRIVS[0];
 		
 		// Create and sign a chat transaction
-		const chatTx: Transaction = {
+		const baseChatTx: Omit<Transaction, 'sig'> = {
 			kind: 'chat',
 			nonce: INITIAL_HEIGHT,
 			from: fromAddr,
 			body: { message: 'Test message' },
-			sig: DUMMY_SIGNATURE,
-		} as Transaction;
+		};
 		
 		const msgToSign = Buffer.from(
 			JSON.stringify({
-				kind: chatTx.kind,
-				nonce: chatTx.nonce.toString(),
-				from: chatTx.from,
-				body: chatTx.body,
+				kind: baseChatTx.kind,
+				nonce: baseChatTx.nonce.toString(),
+				from: baseChatTx.from,
+				body: baseChatTx.body,
 			}),
 		);
-		chatTx.sig = await sign({ message: msgToSign, privateKey: privKey });
+		const signature = sign({ message: msgToSign, privateKey: privKey });
+		const chatTx: Transaction = { ...baseChatTx, sig: signature };
 		
 		// Create ADD_TX input
 		const addTxInput: Input = {
@@ -42,22 +41,22 @@ describe('XLN Consensus Snapshot Test', () => {
 		};
 		
 		// Tick 1: Add transaction
-		const tick1Result = await runtime.tick({ now: Date.now(), incoming: [addTxInput] });
+		const tick1Result = runtime.tick({ now: Date.now(), incoming: [addTxInput] });
 		expect(tick1Result.outbox.length).toBe(1);
 		expect(tick1Result.outbox[0].cmd.type).toBe('PROPOSE');
 		
 		// Tick 2: Process PROPOSE
-		const tick2Result = await runtime.tick({ now: Date.now() + 100, incoming: tick1Result.outbox });
+		const tick2Result = runtime.tick({ now: Date.now() + 100, incoming: tick1Result.outbox });
 		expect(tick2Result.outbox.length).toBe(5); // One SIGN request per signer
 		expect(tick2Result.outbox.every(msg => msg.cmd.type === 'SIGN')).toBe(true);
 		
 		// Tick 3: Process SIGN commands
-		const tick3Result = await runtime.tick({ now: Date.now() + 200, incoming: tick2Result.outbox });
+		const tick3Result = runtime.tick({ now: Date.now() + 200, incoming: tick2Result.outbox });
 		expect(tick3Result.outbox.length).toBe(5); // One COMMIT per replica
 		expect(tick3Result.outbox.every(msg => msg.cmd.type === 'COMMIT')).toBe(true);
 		
 		// Tick 4: Process COMMIT
-		const tick4Result = await runtime.tick({ now: Date.now() + 300, incoming: tick3Result.outbox });
+		const tick4Result = runtime.tick({ now: Date.now() + 300, incoming: tick3Result.outbox });
 		expect(tick4Result.outbox.length).toBe(0); // No more messages
 		
 		// Verify final state
@@ -72,20 +71,21 @@ describe('XLN Consensus Snapshot Test', () => {
 		
 		// Snapshot the final state of the first replica
 		const firstReplica = replicaStates[0];
+		const firstChat = firstReplica.last.state.chat[0];
 		expect({
 			height: firstReplica.last.height.toString(),
 			chatMessages: firstReplica.last.state.chat.length,
-			firstMessage: firstReplica.last.state.chat[0].msg,
+			firstMessage: firstChat?.msg,
 			isAwaitingSignatures: firstReplica.isAwaitingSignatures,
 			mempoolLength: firstReplica.mempool.length,
 		}).toMatchInlineSnapshot(`
-			{
-			  "chatMessages": 1,
-			  "firstMessage": "Test message",
-			  "height": "1",
-			  "isAwaitingSignatures": false,
-			  "mempoolLength": 0,
-			}
-		`);
+{
+  "chatMessages": 1,
+  "firstMessage": "Test message",
+  "height": "1",
+  "isAwaitingSignatures": false,
+  "mempoolLength": 0,
+}
+`);
 	});
 });

@@ -9,7 +9,7 @@
 		"skipLibCheck": true,
 		"forceConsistentCasingInFileNames": true,
 		"resolveJsonModule": true,
-		"types": ["bun-types"],
+		"types": ["bun-types", "jest"],
 		
 		/* Additional strict checks as per codestyle.md */
 		"exactOptionalPropertyTypes": false, // Too restrictive for current codebase

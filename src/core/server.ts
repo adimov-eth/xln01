@@ -7,10 +7,8 @@ import {
 	TS,
 	Hex,
 	Address,
-	UInt64,
 	Frame,
 	EntityState,
-	Quorum,
 } from '../types';
 import { applyCommand } from './entity';
 import { keccak_256 as keccak } from '@noble/hashes/sha3';
@@ -49,7 +47,7 @@ const computeRoot = (replicas: Map<string, Replica>): Hex => {
 };
 
 /* ──────────── helper: trivial power calc (all shares = 1 in MVP) ──────────── */
-const calculatePower = (signatures: Map<Address, string>, _quorum: Quorum) => signatures.size; // in our genesis, each signer has 1 share
+const calculatePower = (signatures: Map<Address, string>) => signatures.size; // in our genesis, each signer has 1 share
 
 /* ──────────── Pure Server reducer (executed every ${TICK_INTERVAL_MS}ms tick) ──────────── */
 /**
@@ -118,8 +116,8 @@ export function applyServerBlock({ prev, batch, timestamp }: ApplyServerBlockPar
 					case 'SIGN': {
 						if (updatedReplica.isAwaitingSignatures && updatedReplica.proposal) {
 							const q = updatedReplica.last.state.quorum;
-							const prevPower = replica.proposal ? calculatePower(replica.proposal.sigs, q) : 0;
-							const newPower = calculatePower(updatedReplica.proposal.sigs, q);
+							const prevPower = replica.proposal ? calculatePower(replica.proposal.sigs) : 0;
+							const newPower = calculatePower(updatedReplica.proposal.sigs);
 							if (prevPower < q.threshold && newPower >= q.threshold) {
 								// Threshold just reached: proposer will broadcast COMMIT
 								// We need to send COMMIT to all replicas of this entity
@@ -172,7 +170,7 @@ export function applyServerBlock({ prev, batch, timestamp }: ApplyServerBlockPar
 	);
 
 	/* ─── After processing all inputs, build the ServerFrame for this tick ─── */
-	const newHeight = (prev.height + 1n) as UInt64;
+	const newHeight = (prev.height + 1n);
 	const rootHash = computeRoot(finalReplicas); // Merkle root of all Entity states after this tick
 	const frame: ServerFrame = {
 		height: newHeight,

@@ -56,7 +56,7 @@ export interface Runtime {
 	readonly ADDRS: readonly string[];
 	readonly PRIVS: readonly Hex[];
 	debugReplicas(): Map<string, Replica>;
-	tick(params: TickParams): Promise<TickResult>;
+	tick(params: TickParams): TickResult;
 }
 
 export const createRuntime = (): Runtime => {
@@ -69,33 +69,32 @@ export const createRuntime = (): Runtime => {
 		])
 	);
 	
-	// Use closure to encapsulate mutable state
-	let currentState = {
+	// Use closure to encapsulate state using a functional pattern
+	const stateRef = { current: {
 		replicas: initialReplicas,
 		height: INITIAL_HEIGHT,
-	};
+	}};
 
 	/** Debug helper: returns all replicas for inspection */
 	const debugReplicas = (): Map<string, Replica> => {
-		return new Map(currentState.replicas);
+		return new Map(stateRef.current.replicas);
 	};
 
 	/** Drive one 100ms tick of the server. Provide current time and any incoming Inputs. */
-	const tick = async ({ now, incoming }: TickParams): Promise<TickResult> => {
+	const tick = ({ now, incoming }: TickParams): TickResult => {
 		// Step 1: apply the pure server logic to get the next state and ServerFrame
 		const { state: nextState, frame, outbox } = applyServerBlock({
-			prev: currentState,
+			prev: stateRef.current,
 			batch: incoming,
 			timestamp: now
 		});
 
 		// Step 2: fulfill signature placeholders in outbox (where private keys are used)
-		const fulfilledOutbox = await Promise.all(
-			outbox.map(async message => {
+		const fulfilledOutbox = outbox.map(message => {
 				if (message.cmd.type === 'SIGN' && message.cmd.sig === DUMMY_SIGNATURE) {
 					// Sign the frame hash with the signer's private key
 					const signerIndex = ADDRS.findIndex(address => address === message.cmd.signer);
-					const signature = await sign({ 
+					const signature = sign({ 
 						message: Buffer.from(message.cmd.frameHash.slice(HEX_PREFIX_LENGTH), 'hex'), 
 						privateKey: PRIVS[signerIndex] 
 					});
@@ -111,7 +110,7 @@ export const createRuntime = (): Runtime => {
 					
 					// Handle both Map and object representations
 					const realSignatures: Hex[] = signatures instanceof Map
-						? [...signatures.values()].filter(sig => sig !== DUMMY_SIGNATURE) as Hex[]
+						? [...signatures.values()].filter(sig => sig !== DUMMY_SIGNATURE)
 						: (signatures && typeof signatures === 'object')
 						? Object.values(signatures).filter((sig): sig is Hex => typeof sig === 'string' && sig !== DUMMY_SIGNATURE)
 						: [];
@@ -120,14 +119,15 @@ export const createRuntime = (): Runtime => {
 						// Get the list of signers who actually signed
 						const signers: Address[] =
 							signatures instanceof Map
-								? [...signatures.entries()].filter(([_, sig]) => sig !== DUMMY_SIGNATURE).map(([address, _]) => address as Address)
+								? [...signatures.entries()].filter(([, sig]) => sig !== DUMMY_SIGNATURE).map(([address]) => address)
 								: Object.entries(signatures)
-										.filter(([_, sig]) => sig !== DUMMY_SIGNATURE)
-										.map(([address, _]) => address as Address);
+										.filter(([, sig]) => sig !== DUMMY_SIGNATURE)
+										.map(([address]) => address as Address);
 
 						const hanko = aggregate(realSignatures);
 						
 						// Create new command without _sigs field
+						// eslint-disable-next-line @typescript-eslint/no-unused-vars
 						const { _sigs, ...commandWithoutSignatures } = commandWithSignatures;
 						return {
 							...message,
@@ -137,6 +137,7 @@ export const createRuntime = (): Runtime => {
 						// This should not happen in normal operation
 						console.error('WARNING: No signatures found for aggregation');
 						const hanko = ('0x' + '00'.repeat(BLS_SIGNATURE_LENGTH)) as Hex;
+						// eslint-disable-next-line @typescript-eslint/no-unused-vars
 						const { _sigs, ...commandWithoutSignatures } = commandWithSignatures;
 						return {
 							...message,
@@ -145,8 +146,7 @@ export const createRuntime = (): Runtime => {
 					}
 				}
 				return message;
-			}),
-		);
+			});
 
 		// Step 3: (Placeholder for actual networking/persistence)
 		// For now, just log the ServerFrame and update state.
@@ -160,7 +160,8 @@ export const createRuntime = (): Runtime => {
 		// - Broadcast the outbox messages over network to respective peers
 
 		// Update the in-memory server state for next tick
-		currentState = nextState;
+		// eslint-disable-next-line functional/immutable-data, fp/no-mutation
+		stateRef.current = nextState;
 		// Return outbox and frame for further processing or inspection
 		return { outbox: fulfilledOutbox, frame };
 	};

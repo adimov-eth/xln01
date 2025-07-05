@@ -37,8 +37,8 @@ export interface VerifyAggregateParams {
 }
 
 /* ──────────── signatures ──────────── */
-export const sign = async ({ message, privateKey }: SignParams): Promise<Hex> => 
-	convertBytesToHex(await bls.sign(message, privateKey));
+export const sign = ({ message, privateKey }: SignParams): Hex => 
+	convertBytesToHex(bls.sign(message, privateKey));
 
 export const verify = ({ message, signature, publicKey }: VerifyParams): boolean =>
 	bls.verify(convertHexToBytes(signature), message, publicKey);

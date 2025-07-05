@@ -5,11 +5,9 @@ import {
 	QUORUM_THRESHOLD,
 	TOTAL_SIGNERS,
 	INITIAL_HEIGHT,
-	DUMMY_SIGNATURE,
 	DEMO_JURISDICTION,
 	DEMO_ENTITY_ID,
 	TICK_INTERVAL_MS,
-	DEMO_WAIT_MS,
 	HASH_DISPLAY_LENGTH,
 } from './constants';
 
@@ -26,17 +24,16 @@ const DEMO_ADDRS = runtime.ADDRS;
 const DEMO_PRIVS = runtime.PRIVS;
 
 // Prepare a chat transaction from the first signer
-const fromAddr = DEMO_ADDRS[0]!; // We know we have 5 signers
-const privKey = DEMO_PRIVS[0]!; // We know we have 5 private keys
-const chatTx: Transaction = {
+const fromAddr = DEMO_ADDRS[0]; // We know we have 5 signers
+const privKey = DEMO_PRIVS[0]; // We know we have 5 private keys
+const baseChatTx: Omit<Transaction, 'sig'> = {
 	kind: 'chat',
 	nonce: INITIAL_HEIGHT,
 	from: fromAddr,
 	body: { message: 'Hello, XLN!' },
-	sig: DUMMY_SIGNATURE, // placeholder for now
-} as Transaction;
+};
 
-(async () => {
+(() => {
 	console.log('=== XLN Chat Consensus Demo ===\n');
 	console.log('Signers:');
 	DEMO_ADDRS.forEach((addr, i) => console.log(`  ${i + 1}. ${addr}`));
@@ -45,13 +42,14 @@ const chatTx: Transaction = {
 	// Sign the transaction
 	const msgToSign = Buffer.from(
 		JSON.stringify({
-			kind: chatTx.kind,
-			nonce: chatTx.nonce.toString(),
-			from: chatTx.from,
-			body: chatTx.body,
+			kind: baseChatTx.kind,
+			nonce: baseChatTx.nonce.toString(),
+			from: baseChatTx.from,
+			body: baseChatTx.body,
 		}),
 	);
-	chatTx.sig = await sign({ message: msgToSign, privateKey: privKey });
+	const signature = sign({ message: msgToSign, privateKey: privKey });
+	const chatTx: Transaction = { ...baseChatTx, sig: signature };
 
 	const addTxInput: Input = {
 		from: fromAddr,
@@ -63,42 +61,35 @@ const chatTx: Transaction = {
 	// and go directly to adding a transaction
 
 	console.log('Tick 1: Add transaction to mempool');
-	const { outbox: out1 } = await runtime.tick({ now: Date.now() + TICK_INTERVAL_MS, incoming: [addTxInput] });
+	const { outbox: out1 } = runtime.tick({ now: Date.now() + TICK_INTERVAL_MS, incoming: [addTxInput] });
 	console.log(`  → Generated ${out1.length} follow-up commands`);
 
 	console.log('\nTick 2: Process PROPOSE (creates frame)');
-	const { outbox: out2 } = await runtime.tick({ now: Date.now() + TICK_INTERVAL_MS * 2, incoming: out1 });
+	const { outbox: out2 } = runtime.tick({ now: Date.now() + TICK_INTERVAL_MS * 2, incoming: out1 });
 	console.log(`  → Proposal created, requesting signatures from ${out2.length} signers`);
 
 	console.log('\nTick 3: Process SIGN commands (collect signatures)');
-	const { outbox: out3 } = await runtime.tick({ now: Date.now() + TICK_INTERVAL_MS * 3, incoming: out2 });
+	const { outbox: out3 } = runtime.tick({ now: Date.now() + TICK_INTERVAL_MS * 3, incoming: out2 });
 	console.log(`  → ${out3.length} COMMIT commands generated`);
 
 	console.log('\nTick 4: Process COMMIT (finalize consensus)');
-	const { frame: finalFrame } = await runtime.tick({ now: Date.now() + TICK_INTERVAL_MS * 4, incoming: out3 });
+	const { frame: finalFrame } = runtime.tick({ now: Date.now() + TICK_INTERVAL_MS * 4, incoming: out3 });
 
 	// Wait a moment for state to settle
-	await new Promise(resolve => setTimeout(resolve, DEMO_WAIT_MS));
+	// No need to wait since we're not using async operations
 
 	console.log('\n=== CONSENSUS ACHIEVED ===');
 
 	// Verify all replicas have converged to the same state
 	console.log('\nVerifying state convergence across all replicas:');
 	const allReplicas = runtime.debugReplicas();
-	let allStatesMatch = true;
-	let firstStateHash: string | null = null;
-
-	for (const [key, replica] of allReplicas) {
+	
+	// Collect state hashes and log replica info
+	const stateHashes = [...allReplicas].map(([key, replica]) => {
 		const chat = replica.last.state.chat;
 		// Custom replacer to handle BigInt serialization
 		const replacer = (_key: string, value: unknown) => (typeof value === 'bigint' ? value.toString() : value);
 		const stateHash = JSON.stringify(replica.last.state, replacer);
-
-		if (firstStateHash === null) {
-			firstStateHash = stateHash;
-		} else if (stateHash !== firstStateHash) {
-			allStatesMatch = false;
-		}
 
 		console.log(`\n  Replica ${key}:`);
 		console.log(`    Height: ${replica.last.height}`);
@@ -108,7 +99,11 @@ const chatTx: Transaction = {
 				console.log(`      ${i + 1}. "${message.msg}" (from ${message.from.slice(0, HASH_DISPLAY_LENGTH)}...)`);
 			});
 		}
-	}
+		
+		return stateHash;
+	});
+	
+	const allStatesMatch = stateHashes.every(hash => hash === stateHashes[0]);
 
 	console.log(
 		'\n  State convergence:',
@@ -120,4 +115,4 @@ const chatTx: Transaction = {
 	console.log(`  State root: ${finalFrame.root.slice(0, 16)}...`);
 
 	console.log('\n✅ Demo completed successfully!');
-})().catch(console.error);
+})();

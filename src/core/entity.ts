@@ -45,10 +45,9 @@ const sortTransaction = (a: Transaction, b: Transaction) =>
 
 const getSharesOf = (address: Address, quorum: Quorum) => quorum.members[address]?.shares ?? 0;
 
-const calculatePower = (signatures: Map<Address, Hex>, quorum: Quorum) =>
-	[...signatures.keys()].reduce((sum, address) => sum + getSharesOf(address, quorum), 0);
-
 // Currently unused but kept for clarity
+// const calculatePower = (signatures: Map<Address, Hex>, quorum: Quorum) =>
+// 	[...signatures.keys()].reduce((sum, address) => sum + getSharesOf(address, quorum), 0);
 // const isThresholdReached = (signatures: Map<Address, Hex>, quorum: Quorum) => calculatePower(signatures, quorum) >= quorum.threshold;
 
 /* ──────────── commit validation ──────────── */
@@ -139,15 +138,21 @@ export const applyTx = ({ state, transaction, timestamp }: ApplyTxParams): Resul
 /** Execute a batch of transactions on the previous frame's state to produce a new Frame. */
 export const execFrame = ({ prev, transactions, timestamp }: ExecFrameParams): Result<Frame<EntityState>> => {
 	const txs = transactions; // Keep using txs for brevity
-	const orderedTxs = txs.slice().sort(sortTransaction);
+	// Create a new sorted array without mutating the original
+	// eslint-disable-next-line fp/no-mutating-methods
+	const orderedTxs = [...txs].sort(sortTransaction);
 	
-	// Apply transactions, propagating errors
-	let currentState = prev.state;
-	for (const tx of orderedTxs) {
-		const result = applyTx({ state: currentState, transaction: tx, timestamp });
-		if (!result.ok) return err(result.error);
-		currentState = result.value;
-	}
+	// Apply transactions functionally, propagating errors
+	const finalStateResult = orderedTxs.reduce<Result<EntityState>>(
+		(stateResult, tx) => {
+			if (!stateResult.ok) return stateResult;
+			return applyTx({ state: stateResult.value, transaction: tx, timestamp });
+		},
+		ok(prev.state)
+	);
+	
+	if (!finalStateResult.ok) return err(finalStateResult.error);
+	const currentState = finalStateResult.value;
 	return ok({
 		height: prev.height + 1n,
 		ts: timestamp,
@@ -225,7 +230,16 @@ export const applyCommand = ({ replica, command }: ApplyCommandParams): Replica 
 			};
 		}
 
-		default:
+		case 'IMPORT':
+			// IMPORT is handled at server level, not entity level
 			return replica;
+		
+		default: {
+			// Exhaustive check
+			// @ts-expect-error - exhaustive type check
+			// eslint-disable-next-line @typescript-eslint/no-unused-vars
+			const _: never = command;
+			return replica;
+		}
 	}
 };

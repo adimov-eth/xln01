@@ -55,23 +55,27 @@ export const decodeTransaction = (buffer: Buffer): Result<Transaction> => {
 		return err(`Transaction must have exactly ${TRANSACTION_FIELD_COUNT} fields`);
 	}
 	
-	const results = [];
-	for (const item of decoded) {
+	const results = decoded.reduce<Buffer[]>((acc, item) => {
 		const result = asBuffer(item);
-		if (!result.ok) return err(result.error);
-		results.push(result.value);
+		if (!result.ok) return acc; // Skip on error
+		return [...acc, result.value];
+	}, []);
+	
+	// Check if all items were converted successfully
+	if (results.length !== decoded.length) {
+		return err('Failed to convert all transaction fields to buffers');
 	}
 	const [kind, nonce, from, body, sig] = results;
 	try {
 		return ok({
 			kind: kind.toString() as TxKind,
 			nonce: convertBufferToBigInt(nonce),
-			from: `${HASH_HEX_PREFIX}${from.toString('hex')}` as Hex,
+			from: `${HASH_HEX_PREFIX}${from.toString('hex')}`,
 			body: JSON.parse(body.toString()) as { message: string },
-			sig: `${HASH_HEX_PREFIX}${sig.toString('hex')}` as Hex,
+			sig: `${HASH_HEX_PREFIX}${sig.toString('hex')}`,
 		});
 	} catch (e) {
-		return err(`Failed to parse transaction: ${e}`);
+		return err(`Failed to parse transaction: ${String(e)}`);
 	}
 };
 
@@ -107,14 +111,20 @@ export const decodeFrame = <S>(buffer: Buffer): Result<Frame<S>> => {
 		return err('Expected array for transactions');
 	}
 	
-	const txs: Transaction[] = [];
-	for (const tx of transactions) {
+	const txResults = transactions.map(tx => {
 		const txBufferResult = asBuffer(tx);
-		if (!txBufferResult.ok) return err(txBufferResult.error);
-		const txResult = decodeTransaction(txBufferResult.value);
-		if (!txResult.ok) return err(txResult.error);
-		txs.push(txResult.value);
+		if (!txBufferResult.ok) return txBufferResult;
+		return decodeTransaction(txBufferResult.value);
+	});
+	
+	// Check for any errors
+	const firstError = txResults.find(r => !r.ok);
+	if (firstError && !firstError.ok) {
+		return err(firstError.error);
 	}
+	
+	const txs = txResults.filter((r): r is Result<Transaction, never> & { ok: true } => r.ok)
+		.map(r => r.value);
 	
 	try {
 		return ok({
@@ -124,7 +134,7 @@ export const decodeFrame = <S>(buffer: Buffer): Result<Frame<S>> => {
 			state: rlp.decode(stateResult.value) as S,
 		});
 	} catch (e) {
-		return err(`Failed to decode frame: ${e}`);
+		return err(`Failed to decode frame: ${String(e)}`);
 	}
 };
 
@@ -157,7 +167,7 @@ const decodeCommand = (arr: RLPDecodedValue[]): Result<Command> => {
 	try {
 		return ok(JSON.parse(cmdDataResult.value.toString(), reviver) as Command);
 	} catch (e) {
-		return err(`Failed to parse command: ${e}`);
+		return err(`Failed to parse command: ${String(e)}`);
 	}
 };
 
@@ -216,21 +226,27 @@ export const decodeServerFrame = (buffer: Buffer): Result<import('../types').Ser
 		return err('Expected array for inputs');
 	}
 	
-	// First decode all inputs, handling errors
-	const decodedInputs: Input[] = [];
-	for (const input of inputs) {
+	// Decode all inputs functionally
+	const inputResults = inputs.map(input => {
 		const inputBufferResult = asBuffer(input);
-		if (!inputBufferResult.ok) return err(inputBufferResult.error);
-		const inputResult = decodeInput(inputBufferResult.value);
-		if (!inputResult.ok) return err(inputResult.error);
-		decodedInputs.push(inputResult.value);
+		if (!inputBufferResult.ok) return inputBufferResult;
+		return decodeInput(inputBufferResult.value);
+	});
+	
+	// Check for any errors
+	const firstError = inputResults.find(r => !r.ok);
+	if (firstError && !firstError.ok) {
+		return err(firstError.error);
 	}
+	
+	const decodedInputs = inputResults.filter((r): r is Result<Input, never> & { ok: true } => r.ok)
+		.map(r => r.value);
 	
 	const frameWithoutHash: import('../types').ServerFrame = {
 		height: convertBufferToBigInt(heightResult.value),
 		ts: Number(timestampResult.value.toString()),
 		inputs: decodedInputs,
-		root: `${HASH_HEX_PREFIX}${rootResult.value.toString('hex')}` as Hex,
+		root: `${HASH_HEX_PREFIX}${rootResult.value.toString('hex')}`,
 		hash: DUMMY_SIGNATURE as Hex,
 	};
 	return ok({
