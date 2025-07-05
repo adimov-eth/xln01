@@ -1,0 +1,23 @@
+{
+  "name": "xln-poc",
+  "version": "0.1.0",
+  "description": "XLN Proof of Concept - BFT consensus chat demo",
+  "main": "src/index.ts",
+  "type": "module",
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "dev": "bun --watch src/index.ts"
+  },
+  "dependencies": {
+    "@noble/curves": "^1.3.0",
+    "@noble/hashes": "^1.3.3",
+    "rlp": "^3.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.5",
+    "bun-types": "^1.0.25"
+  },
+  "engines": {
+    "bun": ">=1.0.0"
+  }
+}
