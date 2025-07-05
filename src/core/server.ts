@@ -9,12 +9,18 @@ import { encServerFrame } from '../codec/rlp';
 /* ──────────── Merkle root computation (simplified for MVP) ──────────── */
 /** Compute a Merkle-like root over all replicas' last states.
  *  (Here we just hash the JSON of all state snapshots; in future, use proper Merkle tree.) */
-const computeRoot = (reps: Map<string, Replica>): Hex =>
-  ('0x' + Buffer.from(
+const computeRoot = (reps: Map<string, Replica>): Hex => {
+  // Custom replacer to handle BigInt serialization
+  const replacer = (key: string, value: any) =>
+    typeof value === 'bigint' ? value.toString() : value;
+  
+  return ('0x' + Buffer.from(
       keccak(JSON.stringify(
-        [...reps.values()].map(r => ({ addr: r.address, state: r.last.state }))
+        [...reps.values()].map(r => ({ addr: r.address, state: r.last.state })),
+        replacer
       ))
     ).toString('hex')) as Hex;
+};
 
 /* ──────────── helper: trivial power calc (all shares = 1 in MVP) ──────────── */
 const power = (sigs: Map<Address, string>, q: any) =>
@@ -34,13 +40,17 @@ export function applyServerBlock(prev: ServerState, batch: Input[], ts: TS) {
 
   const enqueue = (...msgs: Input[]) => { outbox.push(...msgs); };
 
-  for (const { cmd } of batch) {
+  for (const input of batch) {
+    const { cmd } = input;
     /* Determine routing key.
        If the command is entity-specific, route to the Replica that should handle it.
        We use addrKey (jurisdiction:entity) plus signer's address for uniqueness when needed. */
-    const signerPart =
-      cmd.type === 'ADD_TX' ? cmd.tx.from :
-      cmd.type === 'SIGN'   ? cmd.signer   : '';
+    let signerPart = '';
+    if (cmd.type === 'ADD_TX') signerPart = cmd.tx.from;
+    else if (cmd.type === 'SIGN') signerPart = input.to; // Route to the proposer (recipient)
+    else if (cmd.type === 'PROPOSE') signerPart = input.from; // Use the sender as the proposer
+    else if (cmd.type === 'COMMIT') signerPart = input.to; // Route to the recipient
+    
     const key = (cmd.type === 'IMPORT')
       ? ''
       : cmd.addrKey + (signerPart ? ':' + signerPart : '');
@@ -73,7 +83,7 @@ export function applyServerBlock(prev: ServerState, batch: Input[], ts: TS) {
             if (s === updatedRep.proposer) continue;  // skip proposer itself
             enqueue({
               from: s,
-              to:   updatedRep.proposer,
+              to:   updatedRep.proposer,  // Send to proposer
               cmd:  { type: 'SIGN', addrKey: cmd.addrKey,
                       signer: s, frameHash: updatedRep.proposal.hash, sig: '0x00' }
             });
@@ -88,11 +98,22 @@ export function applyServerBlock(prev: ServerState, batch: Input[], ts: TS) {
           const newPower  = power(updatedRep.proposal.sigs, q);
           if (prevPower < q.threshold && newPower >= q.threshold) {
             // Threshold just reached: proposer will broadcast COMMIT
-            enqueue({
-              from: updatedRep.proposer, to: '*',  // '*' indicates broadcast to all
-              cmd:  { type: 'COMMIT', addrKey: cmd.addrKey,
-                      hanko: '0x00', frame: updatedRep.proposal as any }
-            });
+            // We need to send COMMIT to all replicas of this entity
+            for (const signerAddr of Object.keys(updatedRep.last.state.quorum.members)) {
+              enqueue({
+                from: updatedRep.proposer, 
+                to: signerAddr,
+                cmd:  { type: 'COMMIT', addrKey: cmd.addrKey,
+                        hanko: '0x00', frame: {
+                          height: updatedRep.proposal!.height,
+                          ts: updatedRep.proposal!.ts,
+                          txs: updatedRep.proposal!.txs,
+                          state: updatedRep.proposal!.state,
+                          sigs: Object.fromEntries(updatedRep.proposal!.sigs), // Convert Map to object
+                          hash: updatedRep.proposal!.hash
+                        } }
+              });
+            }
           }
         }
         break;
@@ -100,8 +121,9 @@ export function applyServerBlock(prev: ServerState, batch: Input[], ts: TS) {
       case 'ADD_TX': {
         if (!updatedRep.isAwaitingSignatures && updatedRep.mempool.length) {
           // After adding a tx, if not already proposing, trigger a PROPOSE on next tick
+          // The proposer's replica handles the PROPOSE, so we need to route to it
           enqueue({
-            from: rep.proposer, to: rep.proposer,
+            from: updatedRep.proposer, to: updatedRep.proposer,
             cmd:  { type: 'PROPOSE', addrKey: cmd.addrKey, ts }
           });
         }

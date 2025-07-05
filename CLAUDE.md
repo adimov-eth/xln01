@@ -206,3 +206,7 @@ When implementing tests:
 - Frame hashes ensure integrity
 - Threshold signatures provide Byzantine fault tolerance
 - Merkle roots enable efficient state verification
+
+## Memories
+
+- remember this

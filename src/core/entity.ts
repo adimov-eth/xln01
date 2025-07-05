@@ -7,9 +7,14 @@ import { verifyAggregate } from '../crypto/bls';
 
 /* ──────────── frame hashing ──────────── */
 /** Compute canonical hash of a frame's content using keccak256. */
-export const hashFrame = (f: Frame<any>): Hex =>
-  ('0x' + Buffer.from(keccak(JSON.stringify(f))).toString('hex')) as Hex;
+export const hashFrame = (f: Frame<any>): Hex => {
+  // Custom replacer to handle BigInt serialization
+  const replacer = (key: string, value: any) =>
+    typeof value === 'bigint' ? value.toString() : value;
+  
+  return ('0x' + Buffer.from(keccak(JSON.stringify(f, replacer))).toString('hex')) as Hex;
   // TODO: switch to keccak(encFrame(f)) for canonical hashing once codec is stable
+};
 
 /* ──────────── internal helpers ──────────── */
 const sortTx = (a: Transaction, b: Transaction) =>

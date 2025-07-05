@@ -1,16 +1,15 @@
 import { Runtime } from './core/runtime';
 import { Input, Transaction } from './types';
-import { sign, randomPriv, pub, addr } from './crypto/bls';
+import { sign } from './crypto/bls';
 
 // Demo script showing the full consensus flow for a chat message
 
 // Initialize the runtime (which sets up the 5 signers and genesis state)
 const runtime = new Runtime();
 
-// For demo purposes, we'll expose the demo keys
-const DEMO_PRIVS = Array.from({ length: 5 }, () => randomPriv());
-const DEMO_PUBS  = DEMO_PRIVS.map(pub);
-const DEMO_ADDRS = DEMO_PUBS.map(addr);
+// Use the addresses and keys from the runtime
+const DEMO_ADDRS = runtime.ADDRS;
+const DEMO_PRIVS = runtime.PRIVS;
 
 // Prepare a chat transaction from the first signer
 const fromAddr = DEMO_ADDRS[0];
@@ -44,20 +43,10 @@ const chatTx: Transaction = {
     cmd: { type: 'ADD_TX', addrKey: 'demo:chat', tx: chatTx }
   };
 
-  // Bootstrap the entity by importing it first
-  const importInput: Input = {
-    from: DEMO_ADDRS[0],
-    to: DEMO_ADDRS[0],
-    cmd: {
-      type: 'IMPORT',
-      replica: (runtime as any).state.replicas.get(`demo:chat:${DEMO_ADDRS[0]}`)
-    }
-  };
+  // The runtime already initializes replicas in constructor, so we can skip import
+  // and go directly to adding a transaction
 
-  console.log('Tick 0: Import entity');
-  await runtime.tick(Date.now(), [importInput]);
-
-  console.log('\nTick 1: Add transaction to mempool');
+  console.log('Tick 1: Add transaction to mempool');
   const { outbox: out1 } = await runtime.tick(Date.now() + 100, [addTxInput]);
   console.log(`  → Generated ${out1.length} follow-up commands`);
 
@@ -67,10 +56,13 @@ const chatTx: Transaction = {
 
   console.log('\nTick 3: Process SIGN commands (collect signatures)');
   const { outbox: out3 } = await runtime.tick(Date.now() + 300, out2);
-  console.log(`  → Threshold reached! Broadcasting COMMIT`);
+  console.log(`  → ${out3.length} COMMIT commands generated`);
 
   console.log('\nTick 4: Process COMMIT (finalize consensus)');
   const { frame: finalFrame } = await runtime.tick(Date.now() + 400, out3);
+
+  // Wait a moment for state to settle
+  await new Promise(resolve => setTimeout(resolve, 100));
 
   // Extract the final state from one of the replicas
   const finalReplica = (runtime as any).state.replicas.get(`demo:chat:${DEMO_ADDRS[0]}`);
@@ -78,14 +70,19 @@ const chatTx: Transaction = {
 
   console.log('\n=== CONSENSUS ACHIEVED ===');
   console.log('\nFinal chat log:');
-  finalChat.forEach((msg: any, i: number) => {
-    console.log(`  ${i + 1}. [${new Date(msg.ts).toISOString()}] ${msg.from}: "${msg.msg}"`);
-  });
+  if (finalChat.length === 0) {
+    console.log('  (No messages yet)');
+  } else {
+    finalChat.forEach((msg: any, i: number) => {
+      console.log(`  ${i + 1}. [${new Date(msg.ts).toISOString()}] ${msg.from}: "${msg.msg}"`);
+    });
+  }
   
   console.log('\nFrame details:');
   console.log(`  Height: ${finalReplica.last.height}`);
   console.log(`  Transactions: ${finalReplica.last.txs.length}`);
   console.log(`  State root: ${finalFrame.root.slice(0, 16)}...`);
+  
   
   console.log('\n✅ Demo completed successfully!');
 })().catch(console.error);

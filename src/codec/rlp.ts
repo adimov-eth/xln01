@@ -47,8 +47,24 @@ export const decFrame = <S>(b: Buffer): Frame<S> => {
 };
 
 /* — Command encode/decode (wrapped in Input) — */
-const encCmd = (c: Command): unknown => [c.type, JSON.stringify(c)];
-const decCmd = (arr: any[]): Command => JSON.parse(arr[1].toString());
+const encCmd = (c: Command): unknown => {
+  // Custom replacer to handle BigInt serialization
+  const replacer = (key: string, value: any) =>
+    typeof value === 'bigint' ? value.toString() : value;
+  return [c.type, JSON.stringify(c, replacer)];
+};
+const decCmd = (arr: any[]): Command => {
+  // Custom reviver to restore BigInt values
+  const reviver = (key: string, value: any) => {
+    // Detect numeric strings that should be BigInt (nonce, height, etc)
+    if (typeof value === 'string' && /^\d+$/.test(value) && 
+        (key === 'nonce' || key === 'height' || key === 'ts' && value.length > 15)) {
+      return BigInt(value);
+    }
+    return value;
+  };
+  return JSON.parse(arr[1].toString(), reviver);
+};
 
 /* — Input (wire packet) encode/decode — */
 export const encInput = (i: Input): Buffer =>

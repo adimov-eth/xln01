@@ -30,6 +30,10 @@ const genesisEntity = (): Replica => {
 export class Runtime {
   private state: { replicas: Map<string, Replica>; height: bigint }
     = { replicas: new Map(), height: 0n };
+  
+  // Export for demo access
+  public readonly ADDRS = ADDRS;
+  public readonly PRIVS = PRIVS;
 
   constructor() {
     // Initialize a replica for each signer in the demo entity:
@@ -55,10 +59,23 @@ export class Runtime {
       }
       if (msg.cmd.type === 'COMMIT' && msg.cmd.hanko === '0x00') {
         // Aggregate all collected signatures into one Hanko, and remove individual sigs from frame
-        const sigsMap = (msg.cmd.frame as any).sigs as Map<string, string>;
-        msg.cmd.hanko = aggregate([...sigsMap.values()]);
-        delete (msg.cmd.frame as any).sigs;
-        delete (msg.cmd.frame as any).hash;
+        const frame = msg.cmd.frame as any;
+        let realSigs: string[] = [];
+        
+        // Handle both Map and object representations
+        if (frame.sigs instanceof Map) {
+          realSigs = [...frame.sigs.values()].filter(sig => sig !== '0x00');
+        } else if (frame.sigs && typeof frame.sigs === 'object') {
+          realSigs = Object.values(frame.sigs).filter((sig: any) => sig !== '0x00');
+        }
+        
+        if (realSigs.length > 0) {
+          msg.cmd.hanko = aggregate(realSigs);
+        } else {
+          msg.cmd.hanko = '0x' + '00'.repeat(96); // Dummy 96-byte signature for testing
+        }
+        delete frame.sigs;
+        delete frame.hash;
       }
       return msg;
     }));

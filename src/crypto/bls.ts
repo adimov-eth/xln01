@@ -1,5 +1,5 @@
 import { keccak_256 as keccak } from '@noble/hashes/sha3';
-import { bls } from '@noble/curves/bls12-381';
+import { bls12_381 as bls } from '@noble/curves/bls12-381';
 import type { Hex } from '../types';
 
 const bytesToHex = (b: Uint8Array): Hex =>
