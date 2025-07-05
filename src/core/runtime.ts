@@ -45,6 +45,11 @@ export class Runtime {
     this.state.height = 0n;
   }
 
+  /** Debug helper: returns all replicas for inspection */
+  debugReplicas(): Map<string, Replica> {
+    return new Map(this.state.replicas);
+  }
+
   /** Drive one 100ms tick of the server. Provide current time and any incoming Inputs. */
   async tick(now: number, incoming: Input[]) {
     // Step 1: apply the pure server logic to get the next state and ServerFrame

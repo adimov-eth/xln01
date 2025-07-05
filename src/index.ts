@@ -67,25 +67,42 @@ const chatTx: Transaction = {
   // Wait a moment for state to settle
   await new Promise(resolve => setTimeout(resolve, 100));
 
-  // Extract the final state from one of the replicas
-  const finalReplica = (runtime as any).state.replicas.get(`demo:chat:${DEMO_ADDRS[0]}`);
-  const finalChat = finalReplica.last.state.chat;
-
   console.log('\n=== CONSENSUS ACHIEVED ===');
-  console.log('\nFinal chat log:');
-  if (finalChat.length === 0) {
-    console.log('  (No messages yet)');
-  } else {
-    finalChat.forEach((msg: any, i: number) => {
-      console.log(`  ${i + 1}. [${new Date(msg.ts).toISOString()}] ${msg.from}: "${msg.msg}"`);
-    });
+  
+  // Verify all replicas have converged to the same state
+  console.log('\nVerifying state convergence across all replicas:');
+  const allReplicas = runtime.debugReplicas();
+  let allStatesMatch = true;
+  let firstStateHash: string | null = null;
+  
+  for (const [key, replica] of allReplicas) {
+    const chat = replica.last.state.chat;
+    // Custom replacer to handle BigInt serialization
+    const replacer = (key: string, value: any) =>
+      typeof value === 'bigint' ? value.toString() : value;
+    const stateHash = JSON.stringify(replica.last.state, replacer);
+    
+    if (firstStateHash === null) {
+      firstStateHash = stateHash;
+    } else if (stateHash !== firstStateHash) {
+      allStatesMatch = false;
+    }
+    
+    console.log(`\n  Replica ${key}:`);
+    console.log(`    Height: ${replica.last.height}`);
+    console.log(`    Chat messages: ${chat.length}`);
+    if (chat.length > 0) {
+      chat.forEach((msg: any, i: number) => {
+        console.log(`      ${i + 1}. "${msg.msg}" (from ${msg.from.slice(0, 10)}...)`);
+      });
+    }
   }
   
-  console.log('\nFrame details:');
-  console.log(`  Height: ${finalReplica.last.height}`);
-  console.log(`  Transactions: ${finalReplica.last.txs.length}`);
-  console.log(`  State root: ${finalFrame.root.slice(0, 16)}...`);
+  console.log('\n  State convergence:', allStatesMatch ? '✅ SUCCESS - All replicas have identical state' : '❌ FAILED - Replicas have diverged');
   
+  console.log('\nServerFrame details:');
+  console.log(`  Final height: ${finalFrame.height}`);
+  console.log(`  State root: ${finalFrame.root.slice(0, 16)}...`);
   
   console.log('\n✅ Demo completed successfully!');
 })().catch(console.error);

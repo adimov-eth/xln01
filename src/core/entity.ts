@@ -31,6 +31,37 @@ const power = (sigs: Map<Address, Hex>, q: Quorum) =>
 const thresholdReached = (sigs: Map<Address, Hex>, q: Quorum) =>
   power(sigs, q) >= q.threshold;
 
+/* ──────────── commit validation ──────────── */
+/** Validate an incoming COMMIT frame against our current state */
+const validateCommit = (
+  frame: Frame<EntityState>,
+  hanko: Hex,
+  prev: Frame<EntityState>,
+): boolean => {
+  const quorum = prev.state.quorum;
+  
+  // Check height continuity
+  if (frame.height !== prev.height + 1n) return false;
+  
+  // Replay transactions to verify state
+  const replay = execFrame(prev, frame.txs, frame.ts);
+  
+  // Compare the replayed state hash with the frame's state hash
+  const replayStateHash = hashFrame(replay);
+  const frameStateHash = hashFrame(frame);
+  if (replayStateHash !== frameStateHash) return false;
+  
+  // Verify BLS aggregate signature (skip if DEV flag set)
+  if (!process.env.DEV_SKIP_SIGS) {
+    const pubKeys = Object.keys(quorum.members);
+    if (!verifyAggregate(hanko, hashFrame(frame), pubKeys as any)) {
+      return false;
+    }
+  }
+  
+  return true;
+};
+
 /* ──────────── domain-specific state transition (chat) ──────────── */
 /** Apply a single chat transaction to the entity state (assuming nonce and membership are valid). */
 export const applyTx = (st: EntityState, tx: Transaction, ts: TS): EntityState => {
@@ -106,22 +137,23 @@ export const applyCommand = (rep: Replica, cmd: Command): Replica => {
     }
 
     case 'COMMIT': {
-      if (!rep.isAwaitingSignatures || !rep.proposal) return rep;
-      if (hashFrame(cmd.frame) !== rep.proposal.hash) return rep;       // frame integrity check
-      if (!thresholdReached(rep.proposal.sigs, rep.last.state.quorum)) return rep;  // not enough signatures
-      // If threshold reached, optionally verify the aggregate (unless bypassed for testing)
-      if (!process.env.DEV_SKIP_SIGS) {
-        const pubKeys = Object.keys(rep.last.state.quorum.members);
-        if (!verifyAggregate(cmd.hanko, hashFrame(cmd.frame), pubKeys as any)) {
-          throw new Error('Invalid Hanko aggregate signature');
-        }
-      }
-      // Commit: apply the frame as the new last state, reset proposal
+      // Accept Commit even if this replica never saw the proposal
+      
+      // 1. Validate frame & Hanko against our own last state
+      if (!validateCommit(cmd.frame, cmd.hanko, rep.last)) return rep;
+      
+      // 2. Drop txs that were just committed
+      const newMempool = rep.mempool.filter(
+        tx => !cmd.frame.txs.some(c => c.sig === tx.sig)
+      );
+      
+      // 3. Adopt the new state
       return {
         ...rep,
+        last: cmd.frame,
+        mempool: newMempool,
         isAwaitingSignatures: false,
         proposal: undefined,
-        last: cmd.frame
       };
     }
 
