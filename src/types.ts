@@ -8,10 +8,10 @@ export type TS = number; // millisecond timestamp since epoch
 /* ──────────── signer & quorum ──────────── */
 export interface SignerRecord {
 	nonce: Nonce;
-	shares: number; // voting power for this signer
+	shares: bigint; // voting power for this signer
 }
 export interface Quorum {
-	threshold: number; // total shares needed to commit a frame (>=)
+	threshold: bigint; // total shares needed to commit a frame (>=)
 	members: Record<Address, SignerRecord>; // signers by address
 }
 
@@ -22,9 +22,7 @@ export interface EntityState {
 }
 
 /* ──────────── Result type for functional error handling ──────────── */
-export type Result<T, E = string> = 
-	| { ok: true; value: T }
-	| { ok: false; error: E };
+export type Result<T, E = string> = { ok: true; value: T } | { ok: false; error: E };
 
 export const ok = <T>(value: T): Result<T, never> => ({ ok: true, value });
 export const err = <E>(error: E): Result<never, E> => ({ ok: false, error });

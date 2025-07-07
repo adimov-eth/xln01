@@ -1,7 +1,7 @@
-import { keccak_256 as keccak } from '@noble/hashes/sha3';
 import { bls12_381 as bls } from '@noble/curves/bls12-381';
+import { keccak_256 as keccak } from '@noble/hashes/sha3';
+import { ADDRESS_LENGTH, HASH_HEX_PREFIX, HEX_PREFIX_LENGTH } from '../constants';
 import type { Hex } from '../types';
-import { HASH_HEX_PREFIX, ADDRESS_LENGTH, HEX_PREFIX_LENGTH } from '../constants';
 
 const convertBytesToHex = (bytes: Uint8Array): Hex => (HASH_HEX_PREFIX + Buffer.from(bytes).toString('hex')) as Hex;
 const convertHexToBytes = (hex: Hex) => Uint8Array.from(Buffer.from(hex.slice(HEX_PREFIX_LENGTH), 'hex'));

@@ -1,8 +1,8 @@
-import { describe, it, expect } from '@jest/globals';
+import { describe, expect, it } from '@jest/globals';
+import { DEMO_ENTITY_ID, DEMO_JURISDICTION, DUMMY_SIGNATURE, INITIAL_HEIGHT } from '../constants';
 import { applyCommand, applyTx, execFrame } from '../core/entity';
 import { applyServerBlock } from '../core/server';
-import { EntityState, Frame, Replica, Transaction, Hex, Address, ServerState, Input } from '../types';
-import { INITIAL_HEIGHT, DEMO_JURISDICTION, DEMO_ENTITY_ID, DUMMY_SIGNATURE } from '../constants';
+import { Address, EntityState, Frame, Hex, Input, Replica, ServerState, Transaction } from '../types';
 
 describe('XLN Negative Path Tests', () => {
 	// Helper to create a basic entity state
@@ -206,11 +206,11 @@ describe('XLN Negative Path Tests', () => {
 			const baseReplica = createReplica(state);
 
 			// Create replica with a transaction that will fail
-			const replica = {
+			const replica: Replica = {
 				...baseReplica,
 				mempool: [
 					{
-						kind: 'chat',
+						kind: 'chat' as const,
 						nonce: 999n, // Invalid nonce
 						from: '0x1111111111111111111111111111111111111111' as Address,
 						body: { message: 'test' },
@@ -264,11 +264,11 @@ describe('XLN Negative Path Tests', () => {
 			};
 
 			const baseReplica = createReplica(state);
-			const replica = {
+			const replica: Replica = {
 				...baseReplica,
 				mempool: [
 					{
-						kind: 'chat',
+						kind: 'chat' as const,
 						nonce: 0n,
 						from: '0x1111111111111111111111111111111111111111' as Address,
 						body: { message: 'test' },

@@ -1,14 +1,14 @@
+import {
+	DEMO_ENTITY_ID,
+	DEMO_JURISDICTION,
+	HASH_DISPLAY_LENGTH,
+	QUORUM_THRESHOLD,
+	TICK_INTERVAL_MS,
+	TOTAL_SIGNERS,
+} from './constants';
 import { createRuntime } from './core/runtime';
 import { sign } from './crypto/bls';
 import { Input, Transaction } from './types';
-import {
-	QUORUM_THRESHOLD,
-	TOTAL_SIGNERS,
-	DEMO_JURISDICTION,
-	DEMO_ENTITY_ID,
-	TICK_INTERVAL_MS,
-	HASH_DISPLAY_LENGTH,
-} from './constants';
 
 // Demo script showing multiple consensus rounds
 
@@ -26,13 +26,13 @@ const createSignedTransaction = (fromIndex: number, message: string): Transactio
 
 	// Get current nonce from the state
 	const proposerReplica = runtime.debugReplicas().get(`${DEMO_JURISDICTION}:${DEMO_ENTITY_ID}:${DEMO_ADDRS[0]}`);
-	const memberRecord = proposerReplica?.last.state.quorum.members[fromAddr] as { nonce: bigint } | undefined;
+	const memberRecord = proposerReplica?.last.state.quorum.members[fromAddr as `0x${string}`];
 	const currentNonce = memberRecord?.nonce ?? 0n;
 
 	const baseTx: Omit<Transaction, 'sig'> = {
 		kind: 'chat',
 		nonce: currentNonce,
-		from: fromAddr,
+		from: fromAddr as `0x${string}`,
 		body: { message },
 	};
 
@@ -45,7 +45,7 @@ const createSignedTransaction = (fromIndex: number, message: string): Transactio
 		}),
 	);
 
-	const signature = sign({ message: msgToSign, privateKey: privKey });
+	const signature = sign({ message: msgToSign, privateKey: Buffer.from(privKey.slice(2), 'hex') });
 	return { ...baseTx, sig: signature };
 };
 
@@ -65,7 +65,7 @@ const createSignedTransaction = (fromIndex: number, message: string): Transactio
 		// Route all transactions to the fixed proposer (first signer)
 		const addTxInputs: Input[] = transactions.map(tx => ({
 			from: tx.from,
-			to: DEMO_ADDRS[0], // Always send to proposer
+			to: DEMO_ADDRS[0] as `0x${string}`, // Always send to proposer
 			cmd: { type: 'ADD_TX' as const, addrKey: `${DEMO_JURISDICTION}:${DEMO_ENTITY_ID}`, tx },
 		}));
 

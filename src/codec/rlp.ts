@@ -1,14 +1,22 @@
-import * as rlp from 'rlp';
-import type { Frame, Transaction, TxKind, Input, Command, Hex, UInt64, Result } from '../types';
-import { ok, err } from '../types';
 import { keccak_256 as keccak } from '@noble/hashes/sha3';
-import { HASH_HEX_PREFIX, DUMMY_SIGNATURE, TRANSACTION_FIELD_COUNT, FRAME_FIELD_COUNT, COMMAND_FIELD_COUNT, INPUT_FIELD_COUNT, SERVER_FRAME_FIELD_COUNT, TIMESTAMP_BIGINT_THRESHOLD } from '../constants';
+import * as rlp from 'rlp';
+import {
+	COMMAND_FIELD_COUNT,
+	DUMMY_SIGNATURE,
+	FRAME_FIELD_COUNT,
+	HASH_HEX_PREFIX,
+	INPUT_FIELD_COUNT,
+	SERVER_FRAME_FIELD_COUNT,
+	TIMESTAMP_BIGINT_THRESHOLD,
+	TRANSACTION_FIELD_COUNT,
+} from '../constants';
+import type { Command, Frame, Hex, Input, Result, Transaction, TxKind, UInt64 } from '../types';
+import { err, ok } from '../types';
 
 /* — Type helpers for RLP operations — */
 type RLPDecodedValue = Buffer | RLPDecodedValue[];
 
-const isBuffer = (value: RLPDecodedValue): value is Buffer => 
-	Buffer.isBuffer(value);
+const isBuffer = (value: RLPDecodedValue): value is Buffer => Buffer.isBuffer(value);
 
 const asBuffer = (value: RLPDecodedValue): Result<Buffer> => {
 	if (!isBuffer(value)) {
@@ -32,8 +40,10 @@ const asBuffer = (value: RLPDecodedValue): Result<Buffer> => {
 // };
 
 /* — internal helpers for bigint <-> Buffer — */
-const convertBigIntToBuffer = (number: UInt64) => (number === 0n ? Buffer.alloc(0) : Buffer.from(number.toString(16).padStart(2, '0'), 'hex'));
-const convertBufferToBigInt = (buffer: Buffer): UInt64 => (buffer.length === 0 ? 0n : BigInt('0x' + buffer.toString('hex')));
+const convertBigIntToBuffer = (number: UInt64) =>
+	number === 0n ? Buffer.alloc(0) : Buffer.from(number.toString(16).padStart(2, '0'), 'hex');
+const convertBufferToBigInt = (buffer: Buffer): UInt64 =>
+	buffer.length === 0 ? 0n : BigInt(`0x${buffer.toString('hex')}`);
 
 /* — Transaction encode/decode — */
 export const encodeTransaction = (transaction: Transaction): Buffer =>
@@ -54,13 +64,13 @@ export const decodeTransaction = (buffer: Buffer): Result<Transaction> => {
 	if (decoded.length !== TRANSACTION_FIELD_COUNT) {
 		return err(`Transaction must have exactly ${TRANSACTION_FIELD_COUNT} fields`);
 	}
-	
+
 	const results = decoded.reduce<Buffer[]>((acc, item) => {
 		const result = asBuffer(item);
 		if (!result.ok) return acc; // Skip on error
-		return [...acc, result.value];
+		return acc.concat([result.value]);
 	}, []);
-	
+
 	// Check if all items were converted successfully
 	if (results.length !== decoded.length) {
 		return err('Failed to convert all transaction fields to buffers');
@@ -97,35 +107,34 @@ export const decodeFrame = <S>(buffer: Buffer): Result<Frame<S>> => {
 	if (decoded.length !== FRAME_FIELD_COUNT) {
 		return err('Invalid frame structure');
 	}
-	
+
 	const heightResult = asBuffer(decoded[0]);
 	const timestampResult = asBuffer(decoded[1]);
 	const stateResult = asBuffer(decoded[3]);
-	
+
 	if (!heightResult.ok) return err(heightResult.error);
 	if (!timestampResult.ok) return err(timestampResult.error);
 	if (!stateResult.ok) return err(stateResult.error);
-	
+
 	const transactions = decoded[2];
 	if (isBuffer(transactions)) {
 		return err('Expected array for transactions');
 	}
-	
+
 	const txResults = transactions.map(tx => {
 		const txBufferResult = asBuffer(tx);
 		if (!txBufferResult.ok) return txBufferResult;
 		return decodeTransaction(txBufferResult.value);
 	});
-	
+
 	// Check for any errors
 	const firstError = txResults.find(r => !r.ok);
 	if (firstError && !firstError.ok) {
 		return err(firstError.error);
 	}
-	
-	const txs = txResults.filter((r): r is Result<Transaction, never> & { ok: true } => r.ok)
-		.map(r => r.value);
-	
+
+	const txs = txResults.filter((r): r is Result<Transaction, never> & { ok: true } => r.ok).map(r => r.value);
+
 	try {
 		return ok({
 			height: convertBufferToBigInt(heightResult.value),
@@ -141,8 +150,7 @@ export const decodeFrame = <S>(buffer: Buffer): Result<Frame<S>> => {
 /* — Command encode/decode (wrapped in Input) — */
 const encodeCommand = (command: Command): Buffer[] => {
 	// Custom replacer to handle BigInt serialization
-	const replacer = (_key: string, value: unknown) => 
-		typeof value === 'bigint' ? value.toString() : value;
+	const replacer = (_key: string, value: unknown) => (typeof value === 'bigint' ? value.toString() : value);
 	return [Buffer.from(command.type), Buffer.from(JSON.stringify(command, replacer))];
 };
 const decodeCommand = (arr: RLPDecodedValue[]): Result<Command> => {
@@ -163,7 +171,7 @@ const decodeCommand = (arr: RLPDecodedValue[]): Result<Command> => {
 	}
 	const cmdDataResult = asBuffer(arr[1]);
 	if (!cmdDataResult.ok) return err(cmdDataResult.error);
-	
+
 	try {
 		return ok(JSON.parse(cmdDataResult.value.toString(), reviver) as Command);
 	} catch (e) {
@@ -172,7 +180,8 @@ const decodeCommand = (arr: RLPDecodedValue[]): Result<Command> => {
 };
 
 /* — Input (wire packet) encode/decode — */
-export const encodeInput = (input: Input): Buffer => Buffer.from(rlp.encode([input.from, input.to, encodeCommand(input.cmd)]));
+export const encodeInput = (input: Input): Buffer =>
+	Buffer.from(rlp.encode([input.from, input.to, encodeCommand(input.cmd)]));
 export const decodeInput = (buffer: Buffer): Result<Input> => {
 	const decoded = rlp.decode(buffer) as RLPDecodedValue;
 	if (isBuffer(decoded)) {
@@ -181,20 +190,20 @@ export const decodeInput = (buffer: Buffer): Result<Input> => {
 	if (decoded.length !== INPUT_FIELD_COUNT) {
 		return err('Invalid input structure');
 	}
-	
+
 	const fromResult = asBuffer(decoded[0]);
 	const toResult = asBuffer(decoded[1]);
 	if (!fromResult.ok) return err(fromResult.error);
 	if (!toResult.ok) return err(toResult.error);
-	
+
 	const cmdArr = decoded[2];
 	if (isBuffer(cmdArr)) {
 		return err('Expected array for command');
 	}
-	
+
 	const cmdResult = decodeCommand(cmdArr);
 	if (!cmdResult.ok) return err(cmdResult.error);
-	
+
 	return ok({
 		from: fromResult.value.toString() as Hex,
 		to: toResult.value.toString() as Hex,
@@ -217,31 +226,30 @@ export const decodeServerFrame = (buffer: Buffer): Result<import('../types').Ser
 	const timestampResult = asBuffer(decoded[1]);
 	const inputs = decoded[2];
 	const rootResult = asBuffer(decoded[3]);
-	
+
 	if (!heightResult.ok) return err(heightResult.error);
 	if (!timestampResult.ok) return err(timestampResult.error);
 	if (!rootResult.ok) return err(rootResult.error);
-	
+
 	if (isBuffer(inputs)) {
 		return err('Expected array for inputs');
 	}
-	
+
 	// Decode all inputs functionally
 	const inputResults = inputs.map(input => {
 		const inputBufferResult = asBuffer(input);
 		if (!inputBufferResult.ok) return inputBufferResult;
 		return decodeInput(inputBufferResult.value);
 	});
-	
+
 	// Check for any errors
 	const firstError = inputResults.find(r => !r.ok);
 	if (firstError && !firstError.ok) {
 		return err(firstError.error);
 	}
-	
-	const decodedInputs = inputResults.filter((r): r is Result<Input, never> & { ok: true } => r.ok)
-		.map(r => r.value);
-	
+
+	const decodedInputs = inputResults.filter((r): r is Result<Input, never> & { ok: true } => r.ok).map(r => r.value);
+
 	const frameWithoutHash: import('../types').ServerFrame = {
 		height: convertBufferToBigInt(heightResult.value),
 		ts: Number(timestampResult.value.toString()),

@@ -1,22 +1,21 @@
-import {
-	Replica,
+import { keccak_256 as keccak } from '@noble/hashes/sha3';
+import { DUMMY_SIGNATURE, HASH_HEX_PREFIX } from '../constants';
+import { type PubKey, verifyAggregate } from '../crypto/bls';
+import type {
+	Address,
 	Command,
 	EntityState,
 	Frame,
-	Transaction,
-	Quorum,
-	ProposedFrame,
-	Address,
 	Hex,
-	TS,
+	ProposedFrame,
+	Quorum,
+	Replica,
 	Result,
-	ok,
-	err,
+	TS,
+	Transaction,
 } from '../types';
-import { keccak_256 as keccak } from '@noble/hashes/sha3';
-import { verifyAggregate, PubKey } from '../crypto/bls';
+import { err, ok } from '../types';
 import { ADDR_TO_PUB } from './runtime';
-import { HASH_HEX_PREFIX, DUMMY_SIGNATURE } from '../constants';
 
 /* ──────────── RORO Pattern Types ──────────── */
 export interface ValidateCommitParams {
@@ -57,7 +56,10 @@ export const hashFrame = <T>(frame: Frame<T>): Hex => {
 const sortTransaction = (a: Transaction, b: Transaction) =>
 	a.nonce !== b.nonce ? (a.nonce < b.nonce ? -1 : 1) : a.from !== b.from ? (a.from < b.from ? -1 : 1) : 0;
 
-const getSharesOf = (address: Address, quorum: Quorum): bigint => quorum.members[address]?.shares ?? 0n;
+const getSharesOf = (address: Address, quorum: Quorum): bigint => {
+	const shares = quorum.members[address]?.shares;
+	return typeof shares === 'bigint' ? shares : shares !== undefined ? BigInt(shares) : 0n;
+};
 
 // Currently unused but kept for clarity
 // const calculatePower = (signatures: Map<Address, Hex>, quorum: Quorum) =>

@@ -1,8 +1,9 @@
-import { Input, Replica, getAddrKey, ServerFrame, ServerState, TS, Hex, Address, Frame, EntityState } from '../types';
-import { applyCommand } from './entity';
 import { keccak_256 as keccak } from '@noble/hashes/sha3';
 import { encodeServerFrame } from '../codec/rlp';
 import { DUMMY_SIGNATURE, HASH_HEX_PREFIX } from '../constants';
+import type { Address, EntityState, Frame, Hex, Input, Replica, ServerFrame, ServerState, TS } from '../types';
+import { getAddrKey } from '../types';
+import { applyCommand } from './entity';
 
 /* ──────────── RORO Pattern Types ──────────── */
 export interface ApplyServerBlockParams {
@@ -89,8 +90,9 @@ export function applyServerBlock({ prev, batch, timestamp }: ApplyServerBlockPar
 					case 'PROPOSE': {
 						if (!replica.proposal && updatedReplica.proposal) {
 							// Proposal just created: ask all signers (including proposer) to SIGN
+							const proposal = updatedReplica.proposal;
 							// Safety check: ensure proposal actually exists before accessing properties
-							if (!updatedReplica.proposal.hash) {
+							if (!proposal.hash) {
 								console.error('FRAME_BUILD_ERR: Proposal created without hash');
 								return [];
 							}
@@ -101,7 +103,7 @@ export function applyServerBlock({ prev, batch, timestamp }: ApplyServerBlockPar
 									type: 'SIGN' as const,
 									addrKey: command.addrKey,
 									signer: s as Address,
-									frameHash: updatedReplica.proposal.hash,
+									frameHash: proposal.hash,
 									sig: DUMMY_SIGNATURE as Hex,
 								},
 							}));
@@ -110,17 +112,13 @@ export function applyServerBlock({ prev, batch, timestamp }: ApplyServerBlockPar
 					}
 					case 'SIGN': {
 						if (updatedReplica.isAwaitingSignatures && updatedReplica.proposal) {
+							const proposal = updatedReplica.proposal;
 							const q = updatedReplica.last.state.quorum;
 							const prevPower = replica.proposal ? calculatePower(replica.proposal.sigs) : 0;
-							const newPower = calculatePower(updatedReplica.proposal.sigs);
+							const newPower = calculatePower(proposal.sigs);
 							if (prevPower < q.threshold && newPower >= q.threshold) {
 								// Threshold just reached: proposer will broadcast COMMIT
 								// We need to send COMMIT to all replicas of this entity
-								// Safety check: ensure proposal exists before accessing properties
-								if (!updatedReplica.proposal) {
-									console.error('COMMIT_ERR: Proposal disappeared during SIGN processing');
-									return [];
-								}
 								return Object.keys(updatedReplica.last.state.quorum.members).map(signerAddr => ({
 									from: updatedReplica.proposer,
 									to: signerAddr as Address,
@@ -129,13 +127,13 @@ export function applyServerBlock({ prev, batch, timestamp }: ApplyServerBlockPar
 										addrKey: command.addrKey,
 										hanko: DUMMY_SIGNATURE as Hex,
 										frame: {
-											height: updatedReplica.proposal.height,
-											ts: updatedReplica.proposal.ts,
-											txs: updatedReplica.proposal.txs,
-											state: updatedReplica.proposal.state,
+											height: proposal.height,
+											ts: proposal.ts,
+											txs: proposal.txs,
+											state: proposal.state,
 										} as Frame<EntityState>,
 										signers: [], // Will be filled by runtime
-										_sigs: Object.fromEntries(updatedReplica.proposal.sigs), // Pass sigs separately for runtime
+										_sigs: Object.fromEntries(proposal.sigs), // Pass sigs separately for runtime
 									},
 								}));
 							}
@@ -148,8 +146,10 @@ export function applyServerBlock({ prev, batch, timestamp }: ApplyServerBlockPar
 						return [];
 					}
 					case 'COMMIT':
-					case 'IMPORT':
-						// COMMIT and IMPORT do not produce any outbox messages
+						// COMMIT does not produce any outbox messages
+						return [];
+					default:
+						// Exhaustive check - should never reach here
 						return [];
 				}
 			})();

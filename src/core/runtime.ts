@@ -1,23 +1,25 @@
-import { applyServerBlock } from './server';
-import { sign, aggregate, randomPriv, getPublicKey, deriveAddress, PubKey } from '../crypto/bls';
-import { Input, Replica, Frame, EntityState, Quorum, Hex, Address, ServerFrame } from '../types';
 import {
-	TOTAL_SIGNERS,
-	QUORUM_THRESHOLD,
-	DEFAULT_SHARES_PER_SIGNER,
-	DEMO_JURISDICTION,
-	DEMO_ENTITY_ID,
-	INITIAL_HEIGHT,
-	DUMMY_SIGNATURE,
 	BLS_SIGNATURE_LENGTH,
-	HEX_PREFIX_LENGTH,
+	DEFAULT_SHARES_PER_SIGNER,
+	DEMO_ENTITY_ID,
+	DEMO_JURISDICTION,
+	DUMMY_SIGNATURE,
 	HASH_DISPLAY_LENGTH,
+	HEX_PREFIX_LENGTH,
+	INITIAL_HEIGHT,
+	QUORUM_THRESHOLD,
+	TOTAL_SIGNERS,
 } from '../constants';
+import { type PubKey, aggregate, deriveAddress, getPublicKey, randomPriv, sign } from '../crypto/bls';
+import type { Address, EntityState, Frame, Hex, Input, Quorum, Replica, ServerFrame } from '../types';
+import { applyServerBlock } from './server';
 
 /* ──────────── Deterministic demo key generation (5 signers) ──────────── */
 const PRIVS = Array.from({ length: TOTAL_SIGNERS }, () => randomPriv());
 const PUBS = PRIVS.map(privateKey => getPublicKey({ privateKey }));
 const ADDRS = PUBS.map(publicKey => deriveAddress({ publicKey }));
+// Convert private keys to hex format for the Runtime interface
+const PRIV_HEXES = PRIVS.map(priv => `0x${Buffer.from(priv).toString('hex')}`) as readonly Hex[];
 
 // Create a mapping from address to public key for signature verification
 export const ADDR_TO_PUB = new Map<string, PubKey>(ADDRS.map((addr, i) => [addr, PUBS[i]]));
@@ -97,10 +99,12 @@ export const createRuntime = (): Runtime => {
 		// Step 2: fulfill signature placeholders in outbox (where private keys are used)
 		const fulfilledOutbox = outbox.map(message => {
 			if (message.cmd.type === 'SIGN' && message.cmd.sig === DUMMY_SIGNATURE) {
+				// Type guard to ensure we have a SIGN command
+				const signCmd = message.cmd;
 				// Sign the frame hash with the signer's private key
-				const signerIndex = ADDRS.findIndex(address => address === message.cmd.signer);
+				const signerIndex = ADDRS.findIndex(address => address === signCmd.signer);
 				const signature = sign({
-					message: Buffer.from(message.cmd.frameHash.slice(HEX_PREFIX_LENGTH), 'hex'),
+					message: Buffer.from(signCmd.frameHash.slice(HEX_PREFIX_LENGTH), 'hex'),
 					privateKey: PRIVS[signerIndex],
 				});
 				return {
@@ -130,9 +134,11 @@ export const createRuntime = (): Runtime => {
 					const signers: Address[] =
 						signatures instanceof Map
 							? [...signatures.entries()].filter(([, sig]) => sig !== DUMMY_SIGNATURE).map(([address]) => address)
-							: Object.entries(signatures)
-									.filter(([, sig]) => sig !== DUMMY_SIGNATURE)
-									.map(([address]) => address as Address);
+							: signatures
+								? Object.entries(signatures)
+										.filter(([, sig]) => sig !== DUMMY_SIGNATURE)
+										.map(([address]) => address as Address)
+								: [];
 
 					const hanko = aggregate({ signatures: realSignatures });
 
@@ -178,7 +184,7 @@ export const createRuntime = (): Runtime => {
 
 	return {
 		ADDRS,
-		PRIVS,
+		PRIVS: PRIV_HEXES,
 		debugReplicas,
 		tick,
 	};
