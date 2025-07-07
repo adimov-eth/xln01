@@ -4,7 +4,6 @@ import {
 	COMMAND_FIELD_COUNT,
 	DUMMY_SIGNATURE,
 	FRAME_FIELD_COUNT,
-	HASH_HEX_PREFIX,
 	INPUT_FIELD_COUNT,
 	SERVER_FRAME_FIELD_COUNT,
 	TIMESTAMP_BIGINT_THRESHOLD,
@@ -80,9 +79,9 @@ export const decodeTransaction = (buffer: Buffer): Result<Transaction> => {
 		return ok({
 			kind: kind.toString() as TxKind,
 			nonce: convertBufferToBigInt(nonce),
-			from: `${HASH_HEX_PREFIX}${from.toString('hex')}`,
+			from: `0x${from.toString('hex')}`,
 			body: JSON.parse(body.toString()) as { message: string },
-			sig: `${HASH_HEX_PREFIX}${sig.toString('hex')}`,
+			sig: `0x${sig.toString('hex')}`,
 		});
 	} catch (e) {
 		return err(`Failed to parse transaction: ${String(e)}`);
@@ -254,11 +253,11 @@ export const decodeServerFrame = (buffer: Buffer): Result<import('../types').Ser
 		height: convertBufferToBigInt(heightResult.value),
 		ts: Number(timestampResult.value.toString()),
 		inputs: decodedInputs,
-		root: `${HASH_HEX_PREFIX}${rootResult.value.toString('hex')}`,
+		root: `0x${rootResult.value.toString('hex')}`,
 		hash: DUMMY_SIGNATURE as Hex,
 	};
 	return ok({
 		...frameWithoutHash,
-		hash: (HASH_HEX_PREFIX + Buffer.from(keccak(encodeServerFrame(frameWithoutHash))).toString('hex')) as Hex,
+		hash: `0x${Buffer.from(keccak(encodeServerFrame(frameWithoutHash))).toString('hex')}`,
 	});
 };

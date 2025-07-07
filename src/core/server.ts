@@ -1,6 +1,6 @@
 import { keccak_256 as keccak } from '@noble/hashes/sha3';
 import { encodeServerFrame } from '../codec/rlp';
-import { DUMMY_SIGNATURE, HASH_HEX_PREFIX } from '../constants';
+import { DUMMY_SIGNATURE } from '../constants';
 import type { Address, EntityState, Frame, Hex, Input, Replica, ServerFrame, ServerState, TS } from '../types';
 import { getAddrKey } from '../types';
 import { applyCommand } from './entity';
@@ -25,15 +25,14 @@ const computeRoot = (replicas: Map<string, Replica>): Hex => {
 	// Custom replacer to handle BigInt serialization
 	const replacer = (_key: string, value: unknown) => (typeof value === 'bigint' ? value.toString() : value);
 
-	return (HASH_HEX_PREFIX +
-		Buffer.from(
-			keccak(
-				JSON.stringify(
-					[...replicas.values()].map(r => ({ addr: r.address, state: r.last.state })),
-					replacer,
-				),
+	return `0x${Buffer.from(
+		keccak(
+			JSON.stringify(
+				[...replicas.values()].map(r => ({ addr: r.address, state: r.last.state })),
+				replacer,
 			),
-		).toString('hex')) as Hex;
+		),
+	).toString('hex')}`;
 };
 
 /* ──────────── helper: trivial power calc (all shares = 1 in MVP) ──────────── */
@@ -215,18 +214,17 @@ export function applyServerBlock({ prev, batch, timestamp }: ApplyServerBlockPar
 		ts: timestamp,
 		inputs: batch,
 		root: rootHash,
-		hash: (HASH_HEX_PREFIX +
-			Buffer.from(
-				keccak(
-					encodeServerFrame({
-						height: newHeight,
-						ts: timestamp,
-						inputs: batch,
-						root: rootHash,
-						hash: DUMMY_SIGNATURE as Hex,
-					}),
-				),
-			).toString('hex')) as Hex,
+		hash: `0x${Buffer.from(
+			keccak(
+				encodeServerFrame({
+					height: newHeight,
+					ts: timestamp,
+					inputs: batch,
+					root: rootHash,
+					hash: DUMMY_SIGNATURE as Hex,
+				}),
+			),
+		).toString('hex')}`,
 	};
 
 	return {

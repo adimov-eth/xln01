@@ -1,5 +1,5 @@
 import { keccak_256 as keccak } from '@noble/hashes/sha3';
-import { DUMMY_SIGNATURE, HASH_HEX_PREFIX } from '../constants';
+import { DUMMY_SIGNATURE } from '../constants';
 import { type PubKey, verifyAggregate } from '../crypto/bls';
 import type {
 	Address,
@@ -48,7 +48,7 @@ export const hashFrame = <T>(frame: Frame<T>): Hex => {
 	// Custom replacer to handle BigInt serialization
 	const replacer = (_key: string, value: unknown) => (typeof value === 'bigint' ? value.toString() : value);
 
-	return (HASH_HEX_PREFIX + Buffer.from(keccak(JSON.stringify(frame, replacer))).toString('hex')) as Hex;
+	return `0x${Buffer.from(keccak(JSON.stringify(frame, replacer))).toString('hex')}`;
 	// TODO: switch to keccak(encFrame(frame)) for canonical hashing once codec is stable
 };
 
