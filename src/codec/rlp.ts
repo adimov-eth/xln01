@@ -12,7 +12,6 @@ import {
 import type { Command, Frame, Hex, Input, Result, Transaction, TxKind, UInt64 } from '../types';
 import { err, ok } from '../types';
 
-/* — Type helpers for RLP operations — */
 type RLPDecodedValue = Buffer | RLPDecodedValue[];
 
 const asBuffer = (value: RLPDecodedValue): Result<Buffer> => {
@@ -22,34 +21,18 @@ const asBuffer = (value: RLPDecodedValue): Result<Buffer> => {
 	return ok(value);
 };
 
-// Unused but kept for future use
-// const asBufferArray = (value: RLPDecodedValue): Result<Buffer[]> => {
-// 	if (Buffer.isBuffer(value)) {
-// 		return err('Expected array but got Buffer');
-// 	}
-// 	const buffers: Buffer[] = [];
-// 	for (const item of value) {
-// 		const result = asBuffer(item);
-// 		if (!result.ok) return err(result.error);
-// 		buffers.push(result.value);
-// 	}
-// 	return ok(buffers);
-// };
-
-/* — internal helpers for bigint <-> Buffer — */
 const convertBigIntToBuffer = (number: UInt64) =>
 	number === 0n ? Buffer.alloc(0) : Buffer.from(number.toString(16).padStart(2, '0'), 'hex');
 const convertBufferToBigInt = (buffer: Buffer): UInt64 =>
 	buffer.length === 0 ? 0n : BigInt(`0x${buffer.toString('hex')}`);
 
-/* — Transaction encode/decode — */
 export const encodeTransaction = (transaction: Transaction): Buffer =>
 	Buffer.from(
 		rlp.encode([
 			transaction.kind,
 			convertBigIntToBuffer(transaction.nonce),
 			transaction.from,
-			JSON.stringify(transaction.body), // body is small JSON (e.g. {"message": "hi"})
+			JSON.stringify(transaction.body),
 			transaction.sig,
 		]),
 	);
@@ -86,14 +69,13 @@ export const decodeTransaction = (buffer: Buffer): Result<Transaction> => {
 	}
 };
 
-/* — Entity Frame encode/decode — */
 export const encodeFrame = <S>(frame: Frame<S>): Buffer =>
 	Buffer.from(
 		rlp.encode([
 			convertBigIntToBuffer(frame.height),
 			frame.ts,
 			frame.txs.map(encodeTransaction),
-			Buffer.from(JSON.stringify(frame.state)), // state is encoded as JSON for simplicity
+			Buffer.from(JSON.stringify(frame.state)),
 		]),
 	);
 export const decodeFrame = <S>(buffer: Buffer): Result<Frame<S>> => {
@@ -144,14 +126,11 @@ export const decodeFrame = <S>(buffer: Buffer): Result<Frame<S>> => {
 	}
 };
 
-/* — Command encode/decode (wrapped in Input) — */
 const encodeCommand = (command: Command): Buffer[] => {
-	// Custom replacer to handle BigInt serialization
 	const replacer = (_key: string, value: unknown) => (typeof value === 'bigint' ? value.toString() : value);
 	return [Buffer.from(command.type), Buffer.from(JSON.stringify(command, replacer))];
 };
 const decodeCommand = (arr: RLPDecodedValue[]): Result<Command> => {
-	// Custom reviver to restore BigInt values
 	const reviver = (key: string, value: unknown) => {
 		// Detect numeric strings that should be BigInt (nonce, height, etc)
 		if (
@@ -176,7 +155,6 @@ const decodeCommand = (arr: RLPDecodedValue[]): Result<Command> => {
 	}
 };
 
-/* — Input (wire packet) encode/decode — */
 export const encodeInput = (input: Input): Buffer =>
 	Buffer.from(rlp.encode([input.from, input.to, encodeCommand(input.cmd)]));
 export const decodeInput = (buffer: Buffer): Result<Input> => {
@@ -208,7 +186,6 @@ export const decodeInput = (buffer: Buffer): Result<Input> => {
 	});
 };
 
-/* — ServerFrame encode/decode — */
 export const encodeServerFrame = (frame: import('../types').ServerFrame): Buffer =>
 	Buffer.from(rlp.encode([convertBigIntToBuffer(frame.height), frame.ts, frame.inputs.map(encodeInput), frame.root]));
 export const decodeServerFrame = (buffer: Buffer): Result<import('../types').ServerFrame> => {
@@ -232,7 +209,6 @@ export const decodeServerFrame = (buffer: Buffer): Result<import('../types').Ser
 		return err('Expected array for inputs');
 	}
 
-	// Decode all inputs functionally
 	const inputResults = inputs.map(input => {
 		const inputBufferResult = asBuffer(input);
 		if (!inputBufferResult.ok) return inputBufferResult;

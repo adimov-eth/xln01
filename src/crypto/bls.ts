@@ -3,7 +3,6 @@ import { keccak_256 as keccak } from '@noble/hashes/sha3';
 import { ADDRESS_LENGTH } from '../constants';
 import type { Hex } from '../types';
 
-/* ──────────── key helpers ──────────── */
 export type PrivKey = Uint8Array;
 export type PubKey = Uint8Array;
 
@@ -16,7 +15,6 @@ export const deriveAddress = (publicKey: PubKey): Hex => {
 	return `0x${Buffer.from(hash.slice(-ADDRESS_LENGTH)).toString('hex')}`;
 };
 
-/* ──────────── RORO Pattern Types ──────────── */
 export interface SignParams {
 	message: Uint8Array;
 	privateKey: PrivKey;
@@ -34,7 +32,6 @@ export interface VerifyAggregateParams {
 	publicKeys: PubKey[];
 }
 
-/* ──────────── signatures ──────────── */
 export const sign = ({ message, privateKey }: SignParams): Hex =>
 	`0x${Buffer.from(bls.sign(message, privateKey)).toString('hex')}`;
 

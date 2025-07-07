@@ -13,17 +13,13 @@ import { type PubKey, aggregate, deriveAddress, getPublicKey, randomPriv, sign }
 import type { Address, EntityState, Frame, Hex, Input, Quorum, Replica, ServerFrame } from '../types';
 import { applyServerBlock } from './server';
 
-/* ──────────── Deterministic demo key generation (5 signers) ──────────── */
 const PRIVS = Array.from({ length: TOTAL_SIGNERS }, () => randomPriv());
 const PUBS = PRIVS.map(privateKey => getPublicKey(privateKey));
 const ADDRS = PUBS.map(publicKey => deriveAddress(publicKey));
-// Convert private keys to hex format for the Runtime interface
 const PRIV_HEXES = PRIVS.map(priv => `0x${Buffer.from(priv).toString('hex')}`) as readonly Hex[];
 
-// Create a mapping from address to public key for signature verification
 export const ADDR_TO_PUB = new Map<string, PubKey>(ADDRS.map((addr, i) => [addr, PUBS[i]]));
 
-/* ──────────── Bootstrap an initial Replica (genesis state) ──────────── */
 const genesisEntity = (): Replica => {
 	const quorum: Quorum = {
 		threshold: BigInt(QUORUM_THRESHOLD),
@@ -35,11 +31,10 @@ const genesisEntity = (): Replica => {
 	const initFrame: Frame<EntityState> = { height: INITIAL_HEIGHT, ts: 0, txs: [], state: initState };
 	return {
 		address: { jurisdiction: DEMO_JURISDICTION, entityId: DEMO_ENTITY_ID },
-		proposer: ADDRS[0], // Fixed proposer: always the first signer
+		proposer: ADDRS[0],
 		isAwaitingSignatures: false,
 		mempool: [],
 		last: initFrame,
-		// proposal: undefined (implicitly)
 	};
 };
 
@@ -61,15 +56,12 @@ export interface Runtime {
 }
 
 export const createRuntime = (): Runtime => {
-	// Initialize state with replicas for each signer
 	const base = genesisEntity();
-	// Fixed proposer: always use the first signer as the proposer
 	const fixedProposer = ADDRS[0];
 	const initialReplicas = new Map(
 		ADDRS.map(signerAddr => [`demo:chat:${signerAddr}`, { ...base, proposer: fixedProposer } as Replica]),
 	);
 
-	// Use closure to encapsulate state using a functional pattern
 	const stateRef = {
 		current: {
 			replicas: initialReplicas,
@@ -77,14 +69,11 @@ export const createRuntime = (): Runtime => {
 		},
 	};
 
-	/** Debug helper: returns all replicas for inspection */
 	const debugReplicas = (): Map<string, Replica> => {
 		return new Map(stateRef.current.replicas);
 	};
 
-	/** Drive one 100ms tick of the server. Provide current time and any incoming Inputs. */
 	const tick = ({ now, incoming }: TickParams): TickResult => {
-		// Step 1: apply the pure server logic to get the next state and ServerFrame
 		const {
 			state: nextState,
 			frame,
@@ -95,12 +84,9 @@ export const createRuntime = (): Runtime => {
 			timestamp: now,
 		});
 
-		// Step 2: fulfill signature placeholders in outbox (where private keys are used)
 		const fulfilledOutbox = outbox.map(message => {
 			if (message.cmd.type === 'SIGN' && message.cmd.sig === DUMMY_SIGNATURE) {
-				// Type guard to ensure we have a SIGN command
 				const signCmd = message.cmd;
-				// Sign the frame hash with the signer's private key
 				const signerIndex = ADDRS.findIndex(address => address === signCmd.signer);
 				const signature = sign({
 					message: Buffer.from(signCmd.frameHash.slice(2), 'hex'),
@@ -112,13 +98,11 @@ export const createRuntime = (): Runtime => {
 				};
 			}
 			if (message.cmd.type === 'COMMIT' && message.cmd.hanko === DUMMY_SIGNATURE) {
-				// Aggregate all collected signatures into one Hanko
 				const commandWithSignatures = message.cmd as typeof message.cmd & {
 					_sigs?: Map<Address, Hex> | Record<string, Hex>;
 				};
 				const signatures = commandWithSignatures._sigs;
 
-				// Handle both Map and object representations
 				const realSignatures: Hex[] =
 					signatures instanceof Map
 						? [...signatures.values()].filter(sig => sig !== DUMMY_SIGNATURE)
@@ -129,7 +113,6 @@ export const createRuntime = (): Runtime => {
 							: [];
 
 				if (realSignatures.length > 0) {
-					// Get the list of signers who actually signed
 					const signers: Address[] =
 						signatures instanceof Map
 							? [...signatures.entries()].filter(([, sig]) => sig !== DUMMY_SIGNATURE).map(([address]) => address)
@@ -141,7 +124,6 @@ export const createRuntime = (): Runtime => {
 
 					const hanko = aggregate(realSignatures);
 
-					// Create new command without _sigs field
 					// eslint-disable-next-line @typescript-eslint/no-unused-vars
 					const { _sigs, ...commandWithoutSignatures } = commandWithSignatures;
 					return {
@@ -149,7 +131,6 @@ export const createRuntime = (): Runtime => {
 						cmd: { ...commandWithoutSignatures, hanko, signers },
 					};
 				} else {
-					// This should not happen in normal operation
 					console.error('WARNING: No signatures found for aggregation');
 					const hanko = ('0x' + '00'.repeat(BLS_SIGNATURE_LENGTH)) as Hex;
 					// eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -163,16 +144,9 @@ export const createRuntime = (): Runtime => {
 			return message;
 		});
 
-		// Step 3: (Placeholder for actual networking/persistence)
-		// For now, just log the ServerFrame and update state.
 		console.log(
 			`Committed ServerFrame #${frame.height.toString()} – hash: ${frame.hash.slice(0, HASH_DISPLAY_LENGTH)}... root: ${frame.root.slice(0, HASH_DISPLAY_LENGTH)}...`,
 		);
-
-		// In a real node, here we would:
-		// - Append `frame` to WAL (with fsync)
-		// - Possibly take a snapshot of state or prune WAL
-		// - Broadcast the outbox messages over network to respective peers
 
 		// eslint-disable-next-line functional/immutable-data, fp/no-mutation
 		stateRef.current = nextState;

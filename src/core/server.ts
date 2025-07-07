@@ -5,7 +5,6 @@ import type { Address, EntityState, Frame, Hex, Input, Replica, ServerFrame, Ser
 import { getAddrKey } from '../types';
 import { applyCommand } from './entity';
 
-/* ──────────── RORO Pattern Types ──────────── */
 export interface ApplyServerBlockParams {
 	prev: ServerState;
 	batch: Input[];
@@ -18,11 +17,7 @@ export interface ApplyServerBlockResult {
 	outbox: Input[];
 }
 
-/* ──────────── Merkle root computation (simplified for MVP) ──────────── */
-/** Compute a Merkle-like root over all replicas' last states.
- *  (Here we just hash the JSON of all state snapshots; in future, use proper Merkle tree.) */
 const computeRoot = (replicas: Map<string, Replica>): Hex => {
-	// Custom replacer to handle BigInt serialization
 	const replacer = (_key: string, value: unknown) => (typeof value === 'bigint' ? value.toString() : value);
 
 	return `0x${Buffer.from(
@@ -35,16 +30,9 @@ const computeRoot = (replicas: Map<string, Replica>): Hex => {
 	).toString('hex')}`;
 };
 
-/* ──────────── helper: trivial power calc (all shares = 1 in MVP) ──────────── */
-const calculatePower = (signatures: Map<Address, string>) => signatures.size; // in our genesis, each signer has 1 share
+const calculatePower = (signatures: Map<Address, string>) => signatures.size;
 
-/* ──────────── Pure Server reducer (executed every ${TICK_INTERVAL_MS}ms tick) ──────────── */
-/**
- * Apply a batch of Inputs to the server's state for one tick.
- * Uses RORO pattern for cleaner API.
- */
 export function applyServerBlock({ prev, batch, timestamp }: ApplyServerBlockParams): ApplyServerBlockResult {
-	// Process all inputs and collect results
 	const { finalReplicas, allOutbox } = batch.reduce(
 		(acc, input) => {
 			const { cmd: command } = input;
@@ -77,7 +65,7 @@ export function applyServerBlock({ prev, batch, timestamp }: ApplyServerBlockPar
 			}
 
 			const replica = acc.finalReplicas.get(key);
-			if (!replica) return acc; // no replica found (shouldn't happen if IMPORT was done properly)
+			if (!replica) return acc;
 
 			/* ─── Apply the Entity state machine ─── */
 			const updatedReplica = applyCommand({ replica, command });
@@ -140,15 +128,11 @@ export function applyServerBlock({ prev, batch, timestamp }: ApplyServerBlockPar
 						return [];
 					}
 					case 'ADD_TX': {
-						// ADD_TX only adds to mempool, doesn't trigger PROPOSE
-						// PROPOSE will be triggered once per tick if there are pending transactions
 						return [];
 					}
 					case 'COMMIT':
-						// COMMIT does not produce any outbox messages
 						return [];
 					default:
-						// Exhaustive check - should never reach here
 						return [];
 				}
 			})();
@@ -203,7 +187,6 @@ export function applyServerBlock({ prev, batch, timestamp }: ApplyServerBlockPar
 		{ seen: [], commands: [] },
 	).commands;
 
-	// Add PROPOSE commands to outbox
 	const finalOutbox = [...allOutbox, ...proposeCommands];
 
 	/* ─── After processing all inputs, build the ServerFrame for this tick ─── */

@@ -122,7 +122,6 @@ const validateCommit = ({ frame, hanko, prev, signers }: ValidateCommitParams): 
 	try {
 		const isValid = verifyAggregate({ hanko, messageHash: frameHash, publicKeys: pubKeys });
 		if (!isValid) {
-			// BLS signature verification failed
 			return false;
 		}
 	} catch (e) {

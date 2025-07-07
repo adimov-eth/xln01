@@ -60,10 +60,9 @@ const createSignedTransaction = (fromIndex: number, message: string): Transactio
 	const runConsensusRound = (transactions: Transaction[], currentTick: number): number => {
 		console.log(`\n━━━ CONSENSUS ROUND ${Math.floor(currentTick / 4) + 1} ━━━`);
 
-		// Route all transactions to the fixed proposer (first signer)
 		const addTxInputs: Input[] = transactions.map(tx => ({
 			from: tx.from,
-			to: DEMO_ADDRS[0] as `0x${string}`, // Always send to proposer
+			to: DEMO_ADDRS[0] as `0x${string}`,
 			cmd: { type: 'ADD_TX' as const, addrKey: `${DEMO_JURISDICTION}:${DEMO_ENTITY_ID}`, tx },
 		}));
 
