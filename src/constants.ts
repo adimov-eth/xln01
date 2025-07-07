@@ -10,7 +10,6 @@ export const INITIAL_HEIGHT = 0n; // Starting height for frames
 /* ──────────── Cryptography Configuration ──────────── */
 export const BLS_SIGNATURE_LENGTH = 96; // BLS12-381 signature is 96 bytes
 export const ADDRESS_LENGTH = 20; // Ethereum-style addresses are 20 bytes (rightmost of keccak256)
-export const HEX_PREFIX_LENGTH = 2; // Length of '0x' prefix
 export const DUMMY_SIGNATURE = '0x00' as const; // Placeholder signature before runtime fills it
 
 /* ──────────── Demo Configuration ──────────── */

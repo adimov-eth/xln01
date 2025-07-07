@@ -24,7 +24,6 @@ const createSignedTransaction = (fromIndex: number, message: string): Transactio
 	const fromAddr = DEMO_ADDRS[fromIndex];
 	const privKey = DEMO_PRIVS[fromIndex];
 
-	// Get current nonce from the state
 	const proposerReplica = runtime.debugReplicas().get(`${DEMO_JURISDICTION}:${DEMO_ENTITY_ID}:${DEMO_ADDRS[0]}`);
 	const memberRecord = proposerReplica?.last.state.quorum.members[fromAddr as `0x${string}`];
 	const currentNonce = memberRecord?.nonce ?? 0n;
@@ -61,7 +60,6 @@ const createSignedTransaction = (fromIndex: number, message: string): Transactio
 	const runConsensusRound = (transactions: Transaction[], currentTick: number): number => {
 		console.log(`\n━━━ CONSENSUS ROUND ${Math.floor(currentTick / 4) + 1} ━━━`);
 
-		// Create ADD_TX inputs for all transactions
 		// Route all transactions to the fixed proposer (first signer)
 		const addTxInputs: Input[] = transactions.map(tx => ({
 			from: tx.from,

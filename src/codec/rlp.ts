@@ -15,10 +15,8 @@ import { err, ok } from '../types';
 /* — Type helpers for RLP operations — */
 type RLPDecodedValue = Buffer | RLPDecodedValue[];
 
-const isBuffer = (value: RLPDecodedValue): value is Buffer => Buffer.isBuffer(value);
-
 const asBuffer = (value: RLPDecodedValue): Result<Buffer> => {
-	if (!isBuffer(value)) {
+	if (!Buffer.isBuffer(value)) {
 		return err('Expected Buffer but got array');
 	}
 	return ok(value);
@@ -26,7 +24,7 @@ const asBuffer = (value: RLPDecodedValue): Result<Buffer> => {
 
 // Unused but kept for future use
 // const asBufferArray = (value: RLPDecodedValue): Result<Buffer[]> => {
-// 	if (isBuffer(value)) {
+// 	if (Buffer.isBuffer(value)) {
 // 		return err('Expected array but got Buffer');
 // 	}
 // 	const buffers: Buffer[] = [];
@@ -57,7 +55,7 @@ export const encodeTransaction = (transaction: Transaction): Buffer =>
 	);
 export const decodeTransaction = (buffer: Buffer): Result<Transaction> => {
 	const decoded = rlp.decode(buffer) as RLPDecodedValue;
-	if (isBuffer(decoded)) {
+	if (Buffer.isBuffer(decoded)) {
 		return err('Expected array for transaction');
 	}
 	if (decoded.length !== TRANSACTION_FIELD_COUNT) {
@@ -100,7 +98,7 @@ export const encodeFrame = <S>(frame: Frame<S>): Buffer =>
 	);
 export const decodeFrame = <S>(buffer: Buffer): Result<Frame<S>> => {
 	const decoded = rlp.decode(buffer) as RLPDecodedValue;
-	if (isBuffer(decoded)) {
+	if (Buffer.isBuffer(decoded)) {
 		return err('Expected array for frame');
 	}
 	if (decoded.length !== FRAME_FIELD_COUNT) {
@@ -116,7 +114,7 @@ export const decodeFrame = <S>(buffer: Buffer): Result<Frame<S>> => {
 	if (!stateResult.ok) return err(stateResult.error);
 
 	const transactions = decoded[2];
-	if (isBuffer(transactions)) {
+	if (Buffer.isBuffer(transactions)) {
 		return err('Expected array for transactions');
 	}
 
@@ -183,7 +181,7 @@ export const encodeInput = (input: Input): Buffer =>
 	Buffer.from(rlp.encode([input.from, input.to, encodeCommand(input.cmd)]));
 export const decodeInput = (buffer: Buffer): Result<Input> => {
 	const decoded = rlp.decode(buffer) as RLPDecodedValue;
-	if (isBuffer(decoded)) {
+	if (Buffer.isBuffer(decoded)) {
 		return err('Expected array for input');
 	}
 	if (decoded.length !== INPUT_FIELD_COUNT) {
@@ -196,7 +194,7 @@ export const decodeInput = (buffer: Buffer): Result<Input> => {
 	if (!toResult.ok) return err(toResult.error);
 
 	const cmdArr = decoded[2];
-	if (isBuffer(cmdArr)) {
+	if (Buffer.isBuffer(cmdArr)) {
 		return err('Expected array for command');
 	}
 
@@ -215,7 +213,7 @@ export const encodeServerFrame = (frame: import('../types').ServerFrame): Buffer
 	Buffer.from(rlp.encode([convertBigIntToBuffer(frame.height), frame.ts, frame.inputs.map(encodeInput), frame.root]));
 export const decodeServerFrame = (buffer: Buffer): Result<import('../types').ServerFrame> => {
 	const decoded = rlp.decode(buffer) as RLPDecodedValue;
-	if (isBuffer(decoded)) {
+	if (Buffer.isBuffer(decoded)) {
 		return err('Expected array for server frame');
 	}
 	if (decoded.length !== SERVER_FRAME_FIELD_COUNT) {
@@ -230,7 +228,7 @@ export const decodeServerFrame = (buffer: Buffer): Result<import('../types').Ser
 	if (!timestampResult.ok) return err(timestampResult.error);
 	if (!rootResult.ok) return err(rootResult.error);
 
-	if (isBuffer(inputs)) {
+	if (Buffer.isBuffer(inputs)) {
 		return err('Expected array for inputs');
 	}
 

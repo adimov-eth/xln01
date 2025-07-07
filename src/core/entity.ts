@@ -53,12 +53,16 @@ export const hashFrame = <T>(frame: Frame<T>): Hex => {
 };
 
 /* ──────────── internal helpers ──────────── */
-const sortTransaction = (a: Transaction, b: Transaction) =>
-	a.nonce !== b.nonce ? (a.nonce < b.nonce ? -1 : 1) : a.from !== b.from ? (a.from < b.from ? -1 : 1) : 0;
+const sortTransaction = (a: Transaction, b: Transaction) => {
+	if (a.nonce < b.nonce) return -1;
+	if (a.nonce > b.nonce) return 1;
+	if (a.from < b.from) return -1;
+	if (a.from > b.from) return 1;
+	return 0;
+};
 
 const getSharesOf = (address: Address, quorum: Quorum): bigint => {
-	const shares = quorum.members[address]?.shares;
-	return typeof shares === 'bigint' ? shares : shares !== undefined ? BigInt(shares) : 0n;
+	return quorum.members[address]?.shares ?? 0n;
 };
 
 // Currently unused but kept for clarity

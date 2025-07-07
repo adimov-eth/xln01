@@ -5,7 +5,6 @@ import {
 	DEMO_JURISDICTION,
 	DUMMY_SIGNATURE,
 	HASH_DISPLAY_LENGTH,
-	HEX_PREFIX_LENGTH,
 	INITIAL_HEIGHT,
 	QUORUM_THRESHOLD,
 	TOTAL_SIGNERS,
@@ -16,8 +15,8 @@ import { applyServerBlock } from './server';
 
 /* ──────────── Deterministic demo key generation (5 signers) ──────────── */
 const PRIVS = Array.from({ length: TOTAL_SIGNERS }, () => randomPriv());
-const PUBS = PRIVS.map(privateKey => getPublicKey({ privateKey }));
-const ADDRS = PUBS.map(publicKey => deriveAddress({ publicKey }));
+const PUBS = PRIVS.map(privateKey => getPublicKey(privateKey));
+const ADDRS = PUBS.map(publicKey => deriveAddress(publicKey));
 // Convert private keys to hex format for the Runtime interface
 const PRIV_HEXES = PRIVS.map(priv => `0x${Buffer.from(priv).toString('hex')}`) as readonly Hex[];
 
@@ -104,7 +103,7 @@ export const createRuntime = (): Runtime => {
 				// Sign the frame hash with the signer's private key
 				const signerIndex = ADDRS.findIndex(address => address === signCmd.signer);
 				const signature = sign({
-					message: Buffer.from(signCmd.frameHash.slice(HEX_PREFIX_LENGTH), 'hex'),
+					message: Buffer.from(signCmd.frameHash.slice(2), 'hex'),
 					privateKey: PRIVS[signerIndex],
 				});
 				return {
@@ -140,7 +139,7 @@ export const createRuntime = (): Runtime => {
 										.map(([address]) => address as Address)
 								: [];
 
-					const hanko = aggregate({ signatures: realSignatures });
+					const hanko = aggregate(realSignatures);
 
 					// Create new command without _sigs field
 					// eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -175,10 +174,8 @@ export const createRuntime = (): Runtime => {
 		// - Possibly take a snapshot of state or prune WAL
 		// - Broadcast the outbox messages over network to respective peers
 
-		// Update the in-memory server state for next tick
 		// eslint-disable-next-line functional/immutable-data, fp/no-mutation
 		stateRef.current = nextState;
-		// Return outbox and frame for further processing or inspection
 		return { outbox: fulfilledOutbox, frame };
 	};
 
