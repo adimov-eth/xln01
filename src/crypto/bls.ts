@@ -1,9 +1,11 @@
+import { bls12_381 } from '@noble/curves/bls12-381';
 import { keccak_256 as keccak } from '@noble/hashes/sha3';
-import { bls12_381 as bls } from '@noble/curves/bls12-381';
+import { ADDRESS_LENGTH } from '../constants';
 import type { Hex } from '../types';
-import { HASH_HEX_PREFIX, ADDRESS_LENGTH } from '../constants';
 
-const bytesToHex = (b: Uint8Array): Hex => (HASH_HEX_PREFIX + Buffer.from(b).toString('hex')) as Hex;
+const bls = bls12_381;
+
+const bytesToHex = (b: Uint8Array): Hex => `0x${Buffer.from(b).toString('hex')}`;
 const hexToBytes = (h: Hex) => Uint8Array.from(Buffer.from(h.slice(2), 'hex'));
 
 /* ──────────── key helpers ──────────── */
@@ -19,10 +21,9 @@ export const addr = (pb: PubKey): Hex => {
 };
 
 /* ──────────── signatures ──────────── */
-export const sign = async (msg: Uint8Array, pr: PrivKey): Promise<Hex> => bytesToHex(bls.sign(msg, pr));
+export const sign = (msg: Uint8Array, pr: PrivKey): Hex => bytesToHex(bls.sign(msg, pr));
 
-export const verify = (msg: Uint8Array, sig: Hex, pb: PubKey): boolean =>
-	bls.verify(hexToBytes(sig), msg, pb);
+export const verify = (msg: Uint8Array, sig: Hex, pb: PubKey): boolean => bls.verify(hexToBytes(sig), msg, pb);
 
 export const aggregate = (sigs: Hex[]): Hex => bytesToHex(bls.aggregateSignatures(sigs.map(hexToBytes)));
 

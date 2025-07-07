@@ -1,8 +1,18 @@
-import { Replica, Command, EntityState, Frame, Transaction, Quorum, ProposedFrame, Address, Hex, TS } from '../types';
 import { keccak_256 as keccak } from '@noble/hashes/sha3';
-import { verifyAggregate, PubKey } from '../crypto/bls';
+import { type PubKey, verifyAggregate } from '../crypto/bls';
+import type {
+	Address,
+	Command,
+	EntityState,
+	Frame,
+	Hex,
+	ProposedFrame,
+	Quorum,
+	Replica,
+	TS,
+	Transaction,
+} from '../types';
 import { ADDR_TO_PUB } from './runtime';
-import { HASH_HEX_PREFIX } from '../constants';
 
 /* ──────────── RORO Pattern Types ──────────── */
 export interface ValidateCommitParams {
@@ -31,11 +41,11 @@ export interface ApplyCommandParams {
 
 /* ──────────── frame hashing ──────────── */
 /** Compute canonical hash of a frame's content using keccak256. */
-export const hashFrame = (f: Frame<any>): Hex => {
+export const hashFrame = (f: Frame<EntityState>): Hex => {
 	// Custom replacer to handle BigInt serialization
-	const replacer = (key: string, value: any) => (typeof value === 'bigint' ? value.toString() : value);
+	const replacer = (_key: string, value: unknown) => (typeof value === 'bigint' ? value.toString() : value);
 
-	return (HASH_HEX_PREFIX + Buffer.from(keccak(JSON.stringify(f, replacer))).toString('hex')) as Hex;
+	return `0x${Buffer.from(keccak(JSON.stringify(f, replacer))).toString('hex')}`;
 	// TODO: switch to keccak(encFrame(f)) for canonical hashing once codec is stable
 };
 
@@ -45,10 +55,10 @@ const sortTx = (a: Transaction, b: Transaction) =>
 
 const sharesOf = (addr: Address, q: Quorum) => q.members[addr]?.shares ?? 0;
 
-const power = (sigs: Map<Address, Hex>, q: Quorum) =>
-	[...sigs.keys()].reduce((sum, addr) => sum + sharesOf(addr, q), 0);
+// const power = (sigs: Map<Address, Hex>, q: Quorum) =>
+// 	[...sigs.keys()].reduce((sum, addr) => sum + sharesOf(addr, q), 0);
 
-const thresholdReached = (sigs: Map<Address, Hex>, q: Quorum) => power(sigs, q) >= q.threshold;
+// const thresholdReached = (sigs: Map<Address, Hex>, q: Quorum) => power(sigs, q) >= q.threshold;
 
 /* ──────────── commit validation ──────────── */
 /** Validate an incoming COMMIT frame against our current state */
@@ -86,7 +96,7 @@ const validateCommit = ({ frame, hanko, prev, signers }: ValidateCommitParams): 
 				console.error(`No public key found for signer ${addr}`);
 				return keys;
 			}
-			return [...keys, pubKey];
+			return keys.concat([pubKey]);
 		}, []);
 
 		// Check if we got all required public keys
@@ -113,13 +123,13 @@ const validateCommit = ({ frame, hanko, prev, signers }: ValidateCommitParams): 
 
 /* ──────────── domain-specific state transition (chat) ──────────── */
 /** Apply a single chat transaction to the entity state (assuming nonce and membership are valid). */
-export const applyTx = ({ state, transaction, timestamp }: ApplyTxParams): EntityState => {
+export const applyTx = ({ state, transaction, timestamp }: ApplyTxParams): EntityState | null => {
 	const tx = transaction; // Keep using tx for brevity
 	const st = state; // Keep using st for brevity
-	if (tx.kind !== 'chat') throw new Error('Unknown tx kind');
+	if (tx.kind !== 'chat') return null; // Unknown tx kind
 	const rec = st.quorum.members[tx.from];
-	if (!rec) throw new Error('Signer not in quorum');
-	if (tx.nonce !== rec.nonce) throw new Error('Bad nonce'); // stale or duplicate tx
+	if (!rec) return null; // Signer not in quorum
+	if (tx.nonce !== rec.nonce) return null; // Bad nonce - stale or duplicate tx
 
 	// Update the signer's nonce (consume one nonce) and append chat message
 	const updatedMembers = {
@@ -135,11 +145,13 @@ export const applyTx = ({ state, transaction, timestamp }: ApplyTxParams): Entit
 /** Execute a batch of transactions on the previous frame's state to produce a new Frame. */
 export const execFrame = ({ prev, transactions, timestamp }: ExecFrameParams): Frame<EntityState> => {
 	const txs = transactions; // Keep using txs for brevity
-	const orderedTxs = txs.slice().sort(sortTx);
-	const newState = orderedTxs.reduce(
-		(state, tx) => applyTx({ state, transaction: tx, timestamp }),
-		prev.state
-	);
+	// Create a sorted copy using a functional approach
+	// eslint-disable-next-line fp/no-mutating-methods
+	const orderedTxs = [...txs].sort((a, b) => sortTx(a, b));
+	const newState = orderedTxs.reduce((state, tx) => {
+		const result = applyTx({ state, transaction: tx, timestamp });
+		return result || state; // If applyTx returns null, keep current state
+	}, prev.state);
 	return {
 		height: prev.height + 1n,
 		ts: timestamp,
@@ -198,7 +210,7 @@ export const applyCommand = ({ replica, command }: ApplyCommandParams): Replica 
 				}
 			} catch (e) {
 				console.error('COMMIT validation error:', e);
-				return rep;
+				return replica;
 			}
 
 			// 2. Drop txs that were just committed
@@ -212,6 +224,12 @@ export const applyCommand = ({ replica, command }: ApplyCommandParams): Replica 
 				isAwaitingSignatures: false,
 				proposal: undefined,
 			};
+		}
+
+		case 'IMPORT': {
+			// IMPORT command is handled at server level, not entity level
+			// Return replica unchanged
+			return replica;
 		}
 
 		default:
