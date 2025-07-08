@@ -1,83 +1,342 @@
-# XLN Proof of Concept
+# XLN: Cross-Local Network
 
-A minimal implementation of the XLN (Cross-Local Network) consensus protocol demonstrating Byzantine Fault Tolerant (BFT) consensus for a chat application.
+A Byzantine Fault Tolerant consensus system for cross-jurisdictional off-chain settlement with on-chain anchoring.
 
-## Overview
+## Table of Contents
 
-This proof-of-concept implements:
+1. [What is XLN?](#what-is-xln)
+2. [Core Concepts](#core-concepts)
+3. [Architecture Deep Dive](#architecture-deep-dive)
+4. [Consensus Flow](#consensus-flow)
+5. [Implementation Details](#implementation-details)
+6. [Running the System](#running-the-system)
+7. [Security Model](#security-model)
+8. [Design Philosophy](#design-philosophy)
 
-- 5-signer BFT consensus with threshold of 3
-- Pure functional state machines for deterministic execution
-- BLS12-381 aggregate signatures (Hanko)
-- RLP encoding for canonical serialization
-- 100ms tick-based ServerFrame generation
-- Complete ADD_TX → PROPOSE → SIGN → COMMIT flow
+## What is XLN?
 
-## Architecture
+XLN (Cross-Local Network) is a consensus protocol that enables distributed entities to:
+
+- Exchange messages and value instantly off-chain
+- Achieve Byzantine fault-tolerant consensus without a blockchain
+- Anchor final outcomes on-chain only when necessary
+- Operate across different jurisdictions with local compliance
+
+Think of it as a **high-speed rail system** where:
+
+- Trains (transactions) run on local tracks (entities)
+- Stations (server ticks) coordinate schedules globally
+- Tickets (signatures) prove consensus among conductors
+- The destination ledger (blockchain) only records arrivals
+
+## Core Concepts
+
+### 1. **Entity** - The Local Consensus Machine
+
+An Entity is a pure state machine that manages consensus for a specific group. Like a local parliament:
+
+- **Members**: Signers with voting shares (e.g., 5 members)
+- **Quorum**: Threshold for decisions (e.g., 3 of 5 must agree)
+- **Mempool**: Pending transactions awaiting consensus
+- **Frames**: Finalized blocks of transactions with resulting state
+
+### 2. **Server** - The Global Coordinator
+
+The Server orchestrates all entities without participating in consensus. Like air traffic control:
+
+- Routes commands to appropriate entities
+- Generates ServerFrames every 100ms (tick)
+- Computes Merkle roots of all entity states
+- Never holds funds or makes consensus decisions
+
+### 3. **Runtime** - The Bridge to Reality
+
+The Runtime handles all side effects. Like the physical infrastructure:
+
+- Manages cryptographic operations (signing, verification)
+- Persists state (future: WAL, snapshots)
+- Handles network I/O (future: P2P transport)
+- Provides deterministic randomness
+
+### 4. **Hanko (判子)** - The Seal of Consensus
+
+A Hanko is a BLS aggregate signature that proves quorum agreement. Like a traditional Japanese seal:
+
+- Combines multiple signatures into one 48-byte proof
+- Mathematically proves the required threshold was met
+- Cannot be forged without the original private keys
+- Efficient to verify even with many signers
+
+## Architecture Deep Dive
 
 ```
-src/
-├─ core/
-│    ├─ entity.ts    # Pure Entity consensus state machine
-│    ├─ server.ts    # Pure Server routing and state management
-│    └─ runtime.ts   # Side-effectful runtime orchestration
-├─ codec/
-│    └─ rlp.ts       # RLP encoding/decoding
-├─ crypto/
-│    └─ bls.ts       # BLS12-381 cryptographic operations
-├─ types.ts          # Canonical type definitions
-└─ index.ts          # Demo script
+┌─────────────────────────────────────────────────────────────┐
+│                         Runtime                              │
+│  • Cryptography (BLS signing/verification)                  │
+│  • State persistence                                        │
+│  • Network I/O                                              │
+└─────────────────┬───────────────────────────┬───────────────┘
+                  │                           │
+                  ▼                           ▼
+┌─────────────────────────────┐ ┌─────────────────────────────┐
+│         Server              │ │         Entity              │
+│  • Routes commands          │ │  • Processes transactions   │
+│  • Forms ServerFrames       │ │  • Manages consensus        │
+│  • Computes Merkle roots    │ │  • Maintains quorum state   │
+│  • Pure functional          │ │  • Pure functional          │
+└─────────────────────────────┘ └─────────────────────────────┘
 ```
 
-## Installation
+### Layer Responsibilities
+
+1. **Entity Layer** (`src/core/entity.ts`)
+   - Pure functional state transitions
+   - No I/O, no randomness, no timestamps
+   - Deterministic replay from genesis
+   - Commands: `ADD_TX`, `PROPOSE`, `SIGN`, `COMMIT`
+
+2. **Server Layer** (`src/core/server.ts`)
+   - Pure functional routing and aggregation
+   - Maintains global view of all entities
+   - Generates deterministic ServerFrames
+   - Ensures command delivery and ordering
+
+3. **Runtime Layer** (`src/core/runtime.ts`)
+   - Handles all side effects
+   - Fulfills cryptographic signatures
+   - Manages persistence and networking
+   - Provides tick-based execution
+
+## Consensus Flow
+
+The consensus process follows a precise 4-tick choreography:
+
+### Tick 1: ADD_TX (Transaction Submission)
+
+```
+User → Runtime → Server → Entity
+         │
+         └─> Transaction enters mempool
+```
+
+- User submits a signed transaction
+- Server routes it to the correct entity
+- Entity validates signature and nonce
+- Transaction waits in mempool
+
+### Tick 2: PROPOSE (Frame Creation)
+
+```
+Server → Entity (Proposer)
+          │
+          └─> Creates ProposedFrame from mempool
+               └─> Broadcasts SIGN requests
+```
+
+- Server detects pending transactions
+- Triggers proposer to create a frame
+- Frame includes all mempool transactions
+- SIGN commands sent to all quorum members
+
+### Tick 3: SIGN (Signature Collection)
+
+```
+Entity → Runtime → Entity (Proposer)
+           │
+           └─> Each signer creates signature
+                └─> Proposer collects until threshold
+```
+
+- Each signer validates the proposed frame
+- Runtime fulfills signature creation
+- Proposer accumulates signatures
+- When threshold reached, triggers COMMIT
+
+### Tick 4: COMMIT (Finalization)
+
+```
+Entity (Proposer) → All Entities
+                     │
+                     └─> Hanko proves consensus
+                          └─> All replicas update state
+```
+
+- Proposer aggregates signatures into Hanko
+- COMMIT broadcast to all replicas
+- Each replica independently validates
+- State converges across all replicas
+
+## Implementation Details
+
+### Type System
+
+```typescript
+// Core identity types
+type Address = `0x${string}`; // 20-byte Ethereum-style address
+type Hex = `0x${string}`; // Hex-encoded data
+type UInt64 = bigint; // For nonces, timestamps, amounts
+
+// Consensus structures
+interface Frame<T> {
+	height: UInt64; // Monotonic frame number
+	ts: number; // Unix timestamp
+	txs: Transaction[]; // Ordered transactions
+	state: T; // Resulting state
+}
+
+interface Quorum {
+	threshold: bigint; // Signatures required
+	members: Record<
+		Address,
+		{
+			// Voting members
+			nonce: UInt64; // Replay protection
+			shares: bigint; // Voting weight
+		}
+	>;
+}
+```
+
+### Determinism Rules
+
+1. **Transaction Ordering**: By `nonce` → `from` → `kind`
+2. **Timestamp Handling**: Only at Server level, not Entity
+3. **State Computation**: Pure functions, no randomness
+4. **Hash Computation**: Canonical JSON with bigint→string
+
+### Cryptographic Primitives
+
+- **Signatures**: BLS12-381 for aggregation capability
+- **Hashing**: Keccak-256 (Ethereum compatible)
+- **Encoding**: RLP for canonical serialization
+- **Addresses**: Last 20 bytes of keccak(pubkey)
+
+## Running the System
+
+### Prerequisites
 
 ```bash
-# Install Bun runtime (if not already installed)
+# Install Bun runtime
 curl -fsSL https://bun.sh/install | bash
 
-# Install dependencies
+# Clone and install
+git clone <repository>
+cd xln-v02
 bun install
 ```
 
-## Running the Demo
+### Demo Execution
 
 ```bash
 bun run start
 ```
 
-This will:
+This runs a complete consensus demonstration:
 
-1. Initialize 5 signers with equal voting weight
-2. Create a chat transaction from the first signer
-3. Process the consensus flow through 4 ticks:
-   - Tick 1: Add transaction to mempool
-   - Tick 2: Propose frame
-   - Tick 3: Collect signatures
-   - Tick 4: Commit with aggregate signature
-4. Display the final consensus state
+1. Initializes 5 signers (Alice, Bob, Carol, Dave, Eve)
+2. Sets quorum threshold to 3 of 5
+3. Executes multiple consensus rounds
+4. Verifies state convergence across all replicas
 
-## Key Concepts
+### Test Suite
 
-- **Frame**: Entity-level block containing transactions and resulting state
-- **ServerFrame**: Global tick snapshot with Merkle root of all entities
-- **Hanko**: 48-byte BLS aggregate signature proving quorum consensus
-- **Pure State Machines**: No side effects in consensus logic
-- **Deterministic Ordering**: Transactions sorted by nonce→from→kind
+```bash
+bun test                          # All tests
+bun test snapshot                 # Snapshot tests
+bun test negative                 # Failure scenarios
+```
 
-## Security Properties
+## Security Model
 
-- BLS signatures prevent forgery
-- Per-signer nonces prevent replay attacks
-- Deterministic execution ensures consistency
-- Merkle roots enable efficient state verification
-- 3/5 threshold provides Byzantine fault tolerance
+### Byzantine Fault Tolerance
+
+- Tolerates up to `f` Byzantine nodes where `n ≥ 3f + 1`
+- Default: 5 nodes tolerating 1 Byzantine (3 of 5 threshold)
+- Ensures safety: no conflicting commits
+- Ensures liveness: progress with honest majority
+
+### Cryptographic Security
+
+- **Signature Forgery**: Computationally infeasible (BLS12-381)
+- **Replay Attacks**: Prevented by per-signer nonces
+- **State Tampering**: Detected via Merkle root verification
+- **Sybil Attacks**: Prevented by permissioned quorum
+
+### Deterministic Execution
+
+- Same inputs always produce same outputs
+- Enables fraud proofs and state verification
+- Allows replay from genesis or snapshots
+- Critical for cross-jurisdiction dispute resolution
+
+## Design Philosophy
+
+### 1. **Pure Functional Core**
+
+The Entity and Server layers are pure functions:
+
+- No side effects, I/O, or mutable state
+- Enables easy testing and formal verification
+- Allows deterministic replay and debugging
+- Simplifies reasoning about consensus
+
+### 2. **Explicit Effects Boundary**
+
+All side effects isolated in Runtime:
+
+- Clear separation of concerns
+- Mockable for testing
+- Swappable implementations
+- Audit-friendly architecture
+
+### 3. **Tick-Based Execution**
+
+Fixed 100ms ticks provide:
+
+- Predictable performance characteristics
+- Natural batching of operations
+- Simplified timeout handling
+- Deterministic ordering
+
+### 4. **Local-First Design**
+
+Entities operate independently:
+
+- No global blockchain required
+- Minimal coordination overhead
+- Jurisdiction-specific compliance
+- Scalable to many entities
 
 ## Future Extensions
 
-This PoC provides a foundation for:
+### Persistence Layer
 
-- Persistence (WAL and snapshots)
-- Network transport
-- Multi-entity support
-- Channel/payment layers
-- Cross-jurisdiction anchoring
+- Write-Ahead Log (WAL) for crash recovery
+- Periodic state snapshots for fast sync
+- Content-addressed storage for audit trails
+- Pruning strategies for long-running entities
+
+### Network Transport
+
+- P2P message routing between nodes
+- Gossip protocol for command propagation
+- TCP/QUIC transport options
+- NAT traversal and peer discovery
+
+### Cross-Jurisdiction Features
+
+- Multi-entity transactions
+- Atomic swaps between entities
+- Cross-jurisdiction message routing
+- On-chain anchoring protocols
+
+### Production Enhancements
+
+- Dynamic quorum adjustment
+- Member addition/removal protocols
+- Fee mechanisms and rate limiting
+- Monitoring and observability
+
+---
+
+_XLN demonstrates that sophisticated consensus systems can be built with pure functional cores, explicit effect boundaries, and careful architectural layering. The result is a system that's both theoretically sound and practically efficient._
