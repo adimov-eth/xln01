@@ -29,15 +29,24 @@ Think of it as a **high-speed rail system** where:
 - Tickets (signatures) prove consensus among conductors
 - The destination ledger (blockchain) only records arrivals
 
-### Version 0.3 Improvements
+### Version 0.4 Improvements
 
 This implementation includes critical fixes for production readiness:
 
-- **Canonical JSON**: RFC 8785-compliant serialization ensures deterministic hashing across all JavaScript engines
-- **Pure BigInt Arithmetic**: Eliminates Number overflow risks for large nonces or amounts
-- **Weighted Voting**: Proper share-based consensus (not just signature counting)
-- **State Integrity**: Fixed RLP codec to correctly encode/decode frame states
-- **Deterministic Ordering**: Stable transaction and replica sorting
+- **Parent Hash Linking**: Added blockchain-style parent hash linking for replay protection
+- **Mempool Deduplication**: Prevents duplicate transactions based on signature uniqueness
+- **RLP Codec Enhancements**: Fixed timestamp encoding and proper BigInt serialization
+- **Server Robustness**: Early COMMIT height validation and replica lookup fallback
+- **Deterministic State Root**: Added Object.freeze to ensure immutable state computation
+- **Property-Based Testing**: Added fuzz testing for RLP codec round-trip verification
+
+Previous v0.3 improvements:
+
+- **Canonical JSON**: RFC 8785-compliant serialization ensures deterministic hashing
+- **Pure BigInt Arithmetic**: Eliminates Number overflow risks
+- **Weighted Voting**: Proper share-based consensus
+- **State Integrity**: Fixed RLP codec frame encoding
+- **Deterministic Ordering**: Stable transaction sorting
 
 ## Core Concepts
 
@@ -131,6 +140,8 @@ A Hanko is a BLS aggregate signature that proves quorum agreement. Like a tradit
    - Canonical JSON serialization (RFC 8785)
    - RLP encoding for frames and transactions
    - Deterministic BigInt serialization
+   - Proper timestamp encoding with BigInt conversion
+   - Hex utilities for consistent address handling
    - Ensures cross-platform consistency
 
 ## Consensus Flow
@@ -225,11 +236,13 @@ interface Quorum {
 
 ### Determinism Rules
 
-1. **Transaction Ordering**: By `nonce` → `from` (pure bigint comparison)
+1. **Transaction Ordering**: By `nonce` → `from` → `kind` → insertion order
 2. **Timestamp Handling**: Only at Server level, not Entity
 3. **State Computation**: Pure functions, no randomness
 4. **Hash Computation**: RFC 8785-style canonical JSON
 5. **Canonical Serialization**: Deterministic key ordering, bigint→string conversion
+6. **Parent Hash Linking**: Each ServerFrame includes previous frame hash
+7. **Mempool Uniqueness**: Transactions deduplicated by signature
 
 ### Cryptographic Primitives
 
@@ -271,6 +284,12 @@ This runs a complete consensus demonstration:
 bun test                          # All tests
 bun test snapshot                 # Snapshot tests
 bun test negative                 # Failure scenarios
+bun test rlp-codec                # RLP encoding tests
+
+# Development commands
+npm run lint                      # Run ESLint
+npm run format                    # Format with Prettier
+npm run check:all                 # Lint, format, and test
 ```
 
 ## Security Model
@@ -334,23 +353,40 @@ Entities operate independently:
 - Jurisdiction-specific compliance
 - Scalable to many entities
 
-## Recent Improvements (v0.3)
+## Recent Improvements
 
-### Critical Fixes Applied
+### v0.4 - Production Hardening
+
+1. **Blockchain-Style Security**
+   - Parent hash linking in ServerFrames prevents history manipulation
+   - Mempool deduplication based on cryptographic signatures
+   - Early height validation saves computational resources
+
+2. **RLP Codec Refinements**
+   - Proper timestamp encoding using BigInt conversion
+   - Consistent Buffer handling for all encode functions
+   - Comprehensive fuzz testing with fast-check library
+
+3. **Server Layer Robustness**
+   - Fallback replica lookup doesn't trust input routing
+   - Deterministic state root with Object.freeze protection
+   - Quick-fail for invalid COMMIT heights
+
+### v0.3 - Consensus Integrity
 
 1. **Deterministic Serialization**
    - Implemented RFC 8785-style canonical JSON
    - Fixed key ordering across JavaScript engines
    - Proper BigInt to string conversion
 
-2. **Consensus Integrity**
-   - Fixed voting power calculation to use shares, not signature count
-   - Corrected RLP frame decoding (was using RLP on JSON data)
+2. **Consensus Improvements**
+   - Fixed voting power calculation to use shares
+   - Corrected RLP frame decoding
    - Pure BigInt comparison in transaction sorting
 
 3. **Code Quality**
    - Full TypeScript strict mode compliance
-   - ESLint functional programming rules enforced
+   - ESLint functional programming rules
    - Comprehensive test coverage
 
 ## Verification Strategy
