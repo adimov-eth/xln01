@@ -152,8 +152,11 @@ export const execFrame = ({ prev, transactions, timestamp }: ExecFrameParams): R
 
 type CommandHandler<T extends Command = Command> = (replica: Replica, command: T) => Replica;
 
-const handleAddTx: CommandHandler = (replica, command) =>
-	command.type === 'ADD_TX' ? { ...replica, mempool: [...replica.mempool, command.tx] } : replica;
+const handleAddTx: CommandHandler = (replica, command) => {
+	if (command.type !== 'ADD_TX') return replica;
+	if (replica.mempool.some(t => t.sig === command.tx.sig)) return replica;
+	return { ...replica, mempool: [...replica.mempool, command.tx] };
+};
 
 const handlePropose: CommandHandler = (replica, command) => {
 	if (command.type !== 'PROPOSE') return replica;
@@ -182,7 +185,7 @@ const handlePropose: CommandHandler = (replica, command) => {
 		hash: hashFrame(frame),
 		sigs:
 			needsProposerSig && replica.proposer
-				? new Map<Address, Hex>([[replica.proposer, DUMMY_SIGNATURE as Hex]])
+				? new Map<Address, Hex>([[replica.proposer, DUMMY_SIGNATURE]])
 				: new Map<Address, Hex>(),
 	};
 

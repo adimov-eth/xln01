@@ -6,12 +6,12 @@ import {
 	FRAME_FIELD_COUNT,
 	INPUT_FIELD_COUNT,
 	SERVER_FRAME_FIELD_COUNT,
-	TIMESTAMP_BIGINT_THRESHOLD,
 	TRANSACTION_FIELD_COUNT,
 } from '../constants';
-import type { Command, Frame, Hex, Input, Result, Transaction, TxKind, UInt64 } from '../types';
+import type { Command, Frame, Input, Result, Transaction, TxKind, UInt64 } from '../types';
 import { err, ok } from '../types';
 import { canonical } from './canonical';
+import { bufToHex, hexToBuf } from './hex';
 
 type RLPDecodedValue = Buffer | RLPDecodedValue[];
 
@@ -31,14 +31,14 @@ const convertBigIntToBuffer = (n: UInt64) => {
 const convertBufferToBigInt = (buffer: Buffer): UInt64 =>
 	buffer.length === 0 ? 0n : BigInt(`0x${buffer.toString('hex')}`);
 
-export const encodeTransaction = (transaction: Transaction): Buffer =>
+export const encodeTransaction = (tx: Transaction): Buffer =>
 	Buffer.from(
 		rlp.encode([
-			transaction.kind,
-			convertBigIntToBuffer(transaction.nonce),
-			transaction.from,
-			JSON.stringify(transaction.body),
-			transaction.sig,
+			tx.kind,
+			convertBigIntToBuffer(tx.nonce),
+			hexToBuf(tx.from),
+			Buffer.from(canonical(tx.body)),
+			hexToBuf(tx.sig),
 		]),
 	);
 export const decodeTransaction = (buffer: Buffer): Result<Transaction> => {
@@ -60,14 +60,14 @@ export const decodeTransaction = (buffer: Buffer): Result<Transaction> => {
 	if (results.length !== decoded.length) {
 		return err('Failed to convert all transaction fields to buffers');
 	}
-	const [kind, nonce, from, body, sig] = results;
+	const [kindBuf, nonceBuf, fromBuf, bodyBuf, sigBuf] = results;
 	try {
 		return ok({
-			kind: kind.toString() as TxKind,
-			nonce: convertBufferToBigInt(nonce),
-			from: `0x${from.toString('hex')}`,
-			body: JSON.parse(body.toString()) as { message: string },
-			sig: `0x${sig.toString('hex')}`,
+			kind: kindBuf.toString() as TxKind,
+			nonce: convertBufferToBigInt(nonceBuf),
+			from: bufToHex(fromBuf),
+			body: JSON.parse(bodyBuf.toString()) as { message: string },
+			sig: bufToHex(sigBuf),
 		});
 	} catch (e) {
 		return err(`Failed to parse transaction: ${String(e)}`);
@@ -122,7 +122,7 @@ export const decodeFrame = <S>(buffer: Buffer): Result<Frame<S>> => {
 	try {
 		return ok({
 			height: convertBufferToBigInt(heightResult.value),
-			ts: Number(timestampResult.value.toString()),
+			ts: Number(convertBufferToBigInt(timestampResult.value)),
 			txs,
 			state: JSON.parse(stateResult.value.toString()) as S,
 		});
@@ -138,11 +138,7 @@ const encodeCommand = (command: Command): Buffer[] => {
 const decodeCommand = (arr: RLPDecodedValue[]): Result<Command> => {
 	const reviver = (key: string, value: unknown) => {
 		// Detect numeric strings that should be BigInt (nonce, height, etc)
-		if (
-			typeof value === 'string' &&
-			/^\d+$/.test(value) &&
-			(key === 'nonce' || key === 'height' || (key === 'ts' && value.length > TIMESTAMP_BIGINT_THRESHOLD))
-		) {
+		if (typeof value === 'string' && /^\d+$/.test(value) && (key === 'nonce' || key === 'height' || key === 'ts')) {
 			return BigInt(value);
 		}
 		return value;
@@ -161,7 +157,7 @@ const decodeCommand = (arr: RLPDecodedValue[]): Result<Command> => {
 };
 
 export const encodeInput = (input: Input): Buffer =>
-	Buffer.from(rlp.encode([input.from, input.to, encodeCommand(input.cmd)]));
+	Buffer.from(rlp.encode([hexToBuf(input.from), hexToBuf(input.to), encodeCommand(input.cmd)]));
 export const decodeInput = (buffer: Buffer): Result<Input> => {
 	const decoded = rlp.decode(buffer) as RLPDecodedValue;
 	if (Buffer.isBuffer(decoded)) {
@@ -185,14 +181,22 @@ export const decodeInput = (buffer: Buffer): Result<Input> => {
 	if (!cmdResult.ok) return err(cmdResult.error);
 
 	return ok({
-		from: fromResult.value.toString() as Hex,
-		to: toResult.value.toString() as Hex,
+		from: bufToHex(fromResult.value),
+		to: bufToHex(toResult.value),
 		cmd: cmdResult.value,
 	});
 };
 
 export const encodeServerFrame = (frame: import('../types').ServerFrame): Buffer =>
-	Buffer.from(rlp.encode([convertBigIntToBuffer(frame.height), frame.ts, frame.inputs.map(encodeInput), frame.root]));
+	Buffer.from(
+		rlp.encode([
+			convertBigIntToBuffer(frame.height),
+			frame.ts,
+			frame.inputs.map(encodeInput),
+			hexToBuf(frame.root),
+			hexToBuf(frame.parent),
+		]),
+	);
 export const decodeServerFrame = (buffer: Buffer): Result<import('../types').ServerFrame> => {
 	const decoded = rlp.decode(buffer) as RLPDecodedValue;
 	if (Buffer.isBuffer(decoded)) {
@@ -205,10 +209,12 @@ export const decodeServerFrame = (buffer: Buffer): Result<import('../types').Ser
 	const timestampResult = asBuffer(decoded[1]);
 	const inputs = decoded[2];
 	const rootResult = asBuffer(decoded[3]);
+	const parentResult = asBuffer(decoded[4]);
 
 	if (!heightResult.ok) return err(heightResult.error);
 	if (!timestampResult.ok) return err(timestampResult.error);
 	if (!rootResult.ok) return err(rootResult.error);
+	if (!parentResult.ok) return err(parentResult.error);
 
 	if (Buffer.isBuffer(inputs)) {
 		return err('Expected array for inputs');
@@ -232,11 +238,12 @@ export const decodeServerFrame = (buffer: Buffer): Result<import('../types').Ser
 		height: convertBufferToBigInt(heightResult.value),
 		ts: Number(timestampResult.value.toString()),
 		inputs: decodedInputs,
-		root: `0x${rootResult.value.toString('hex')}`,
-		hash: DUMMY_SIGNATURE as Hex,
+		root: bufToHex(rootResult.value),
+		parent: bufToHex(parentResult.value),
+		hash: DUMMY_SIGNATURE,
 	};
 	return ok({
 		...frameWithoutHash,
-		hash: `0x${Buffer.from(keccak(encodeServerFrame(frameWithoutHash))).toString('hex')}`,
+		hash: bufToHex(Buffer.from(keccak(encodeServerFrame(frameWithoutHash)))),
 	});
 };

@@ -80,10 +80,12 @@ export interface ServerFrame {
 	ts: TS;
 	inputs: Input[];
 	root: Hex;
+	parent: Hex;
 	hash: Hex;
 }
 
 export interface ServerState {
 	height: UInt64;
 	replicas: Map<string, Replica>;
+	lastHash: Hex;
 }

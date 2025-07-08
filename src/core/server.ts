@@ -1,8 +1,8 @@
 import { keccak_256 as keccak } from '@noble/hashes/sha3';
 import { canonical } from '../codec/canonical';
 import { encodeServerFrame } from '../codec/rlp';
-import { DUMMY_SIGNATURE } from '../constants';
-import type { Address, EntityState, Frame, Hex, Input, Quorum, Replica, ServerFrame, ServerState, TS } from '../types';
+import { DUMMY_SIGNATURE, EMPTY_HASH } from '../constants';
+import type { Address, Hex, Input, Quorum, Replica, ServerFrame, ServerState, TS } from '../types';
 import { getAddrKey } from '../types';
 import { applyCommand } from './entity';
 
@@ -55,10 +55,12 @@ export function applyServerBlock({ prev, batch, timestamp }: ApplyServerBlockPar
 			/* ─── IMPORT command (bootstrap a new Entity into server state) ─── */
 			if (command.type === 'IMPORT') {
 				const baseReplica = command.replica;
-				const eKey = getAddrKey(baseReplica.address); // e.g. "demo:chat"
-				// Clone and insert one Replica per signer in the quorum (each signer gets its own replica state)
+				const eKey = getAddrKey(baseReplica.address);
 				const newReplicas = Object.keys(baseReplica.last.state.quorum.members).reduce((reps, signerAddr) => {
-					const replicaCopy: Replica = { ...baseReplica, proposer: signerAddr as Address };
+					const replicaCopy: Replica = {
+						...structuredClone(baseReplica),
+						proposer: signerAddr as Address,
+					};
 					return new Map(reps).set(`${eKey}:${signerAddr}`, replicaCopy);
 				}, acc.finalReplicas);
 				return { finalReplicas: newReplicas, allOutbox: acc.allOutbox };
@@ -91,7 +93,7 @@ export function applyServerBlock({ prev, batch, timestamp }: ApplyServerBlockPar
 									addrKey: command.addrKey,
 									signer: s as Address,
 									frameHash: proposal.hash,
-									sig: DUMMY_SIGNATURE as Hex,
+									sig: DUMMY_SIGNATURE,
 								},
 							}));
 						}
@@ -112,13 +114,13 @@ export function applyServerBlock({ prev, batch, timestamp }: ApplyServerBlockPar
 									cmd: {
 										type: 'COMMIT' as const,
 										addrKey: command.addrKey,
-										hanko: DUMMY_SIGNATURE as Hex,
+										hanko: DUMMY_SIGNATURE,
 										frame: {
 											height: proposal.height,
 											ts: proposal.ts,
 											txs: proposal.txs,
 											state: proposal.state,
-										} as Frame<EntityState>,
+										},
 										signers: [], // Will be filled by runtime
 										_sigs: Object.fromEntries(proposal.sigs), // Pass sigs separately for runtime
 									},
@@ -197,6 +199,7 @@ export function applyServerBlock({ prev, batch, timestamp }: ApplyServerBlockPar
 		ts: timestamp,
 		inputs: batch,
 		root: rootHash,
+		parent: prev.lastHash ?? EMPTY_HASH,
 		hash: `0x${Buffer.from(
 			keccak(
 				encodeServerFrame({
@@ -204,14 +207,15 @@ export function applyServerBlock({ prev, batch, timestamp }: ApplyServerBlockPar
 					ts: timestamp,
 					inputs: batch,
 					root: rootHash,
-					hash: DUMMY_SIGNATURE as Hex,
+					parent: prev.lastHash ?? EMPTY_HASH,
+					hash: DUMMY_SIGNATURE,
 				}),
 			),
 		).toString('hex')}`,
 	};
 
 	return {
-		state: { replicas: finalReplicas, height: newHeight },
+		state: { replicas: finalReplicas, height: newHeight, lastHash: frame.hash },
 		frame,
 		outbox: finalOutbox,
 	};

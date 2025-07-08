@@ -4,6 +4,7 @@ import {
 	DEMO_ENTITY_ID,
 	DEMO_JURISDICTION,
 	DUMMY_SIGNATURE,
+	EMPTY_HASH,
 	HASH_DISPLAY_LENGTH,
 	INITIAL_HEIGHT,
 	QUORUM_THRESHOLD,
@@ -87,6 +88,7 @@ export const createRuntime = (): Runtime => {
 		current: {
 			replicas: initialReplicas,
 			height: INITIAL_HEIGHT,
+			lastHash: EMPTY_HASH,
 		},
 	};
 

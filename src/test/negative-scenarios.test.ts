@@ -1,5 +1,5 @@
 import { describe, expect, it } from '@jest/globals';
-import { DEMO_ENTITY_ID, DEMO_JURISDICTION, DUMMY_SIGNATURE, INITIAL_HEIGHT } from '../constants';
+import { DEMO_ENTITY_ID, DEMO_JURISDICTION, DUMMY_SIGNATURE, EMPTY_HASH, INITIAL_HEIGHT } from '../constants';
 import { applyCommand, applyTx, execFrame } from '../core/entity';
 import { applyServerBlock } from '../core/server';
 import { Address, EntityState, Frame, Hex, Input, Replica, ServerState, Transaction } from '../types';
@@ -43,7 +43,7 @@ describe('XLN Negative Path Tests', () => {
 				nonce: 5n, // Wrong nonce (should be 0)
 				from: '0x1111111111111111111111111111111111111111' as Address,
 				body: { message: 'test' },
-				sig: DUMMY_SIGNATURE as Hex,
+				sig: DUMMY_SIGNATURE,
 			};
 
 			const result = applyTx({ state, transaction: tx, timestamp: Date.now() });
@@ -60,7 +60,7 @@ describe('XLN Negative Path Tests', () => {
 				nonce: 0n,
 				from: '0x9999999999999999999999999999999999999999' as Address,
 				body: { message: 'test' },
-				sig: DUMMY_SIGNATURE as Hex,
+				sig: DUMMY_SIGNATURE,
 			};
 
 			const result = applyTx({ state, transaction: tx, timestamp: Date.now() });
@@ -78,7 +78,7 @@ describe('XLN Negative Path Tests', () => {
 				nonce: 0n,
 				from: '0x1111111111111111111111111111111111111111' as Address,
 				body: { message: 'test' },
-				sig: DUMMY_SIGNATURE as Hex,
+				sig: DUMMY_SIGNATURE,
 			} as Transaction;
 
 			const result = applyTx({ state, transaction: tx, timestamp: Date.now() });
@@ -118,7 +118,7 @@ describe('XLN Negative Path Tests', () => {
 				addrKey: `${DEMO_JURISDICTION}:${DEMO_ENTITY_ID}`,
 				signer: '0x1111111111111111111111111111111111111111' as Address,
 				frameHash: '0x2222222222222222222222222222222222222222222222222222222222222222' as Hex, // Different hash
-				sig: DUMMY_SIGNATURE as Hex,
+				sig: DUMMY_SIGNATURE,
 			};
 
 			const result = applyCommand({ replica, command });
@@ -142,7 +142,7 @@ describe('XLN Negative Path Tests', () => {
 				addrKey: `${DEMO_JURISDICTION}:${DEMO_ENTITY_ID}`,
 				signer: '0x9999999999999999999999999999999999999999' as Address,
 				frameHash: '0x1111111111111111111111111111111111111111111111111111111111111111' as Hex,
-				sig: DUMMY_SIGNATURE as Hex,
+				sig: DUMMY_SIGNATURE,
 			};
 
 			const result = applyCommand({ replica, command });
@@ -156,7 +156,7 @@ describe('XLN Negative Path Tests', () => {
 				nonce: 999n, // Invalid nonce
 				from: '0x1111111111111111111111111111111111111111' as Address,
 				body: { message: 'test' },
-				sig: DUMMY_SIGNATURE as Hex,
+				sig: DUMMY_SIGNATURE,
 			};
 
 			const result = execFrame({ prev, transactions: [badTx], timestamp: Date.now() });
@@ -172,6 +172,7 @@ describe('XLN Negative Path Tests', () => {
 			const serverState: ServerState = {
 				replicas: new Map(),
 				height: INITIAL_HEIGHT,
+				lastHash: EMPTY_HASH,
 			};
 
 			const input: Input = {
@@ -185,7 +186,7 @@ describe('XLN Negative Path Tests', () => {
 						nonce: 0n,
 						from: '0x1111111111111111111111111111111111111111' as Address,
 						body: { message: 'test' },
-						sig: DUMMY_SIGNATURE as Hex,
+						sig: DUMMY_SIGNATURE,
 					},
 				},
 			};
@@ -214,7 +215,7 @@ describe('XLN Negative Path Tests', () => {
 						nonce: 999n, // Invalid nonce
 						from: '0x1111111111111111111111111111111111111111' as Address,
 						body: { message: 'test' },
-						sig: DUMMY_SIGNATURE as Hex,
+						sig: DUMMY_SIGNATURE,
 					},
 				],
 			};
@@ -224,6 +225,7 @@ describe('XLN Negative Path Tests', () => {
 					[`${DEMO_JURISDICTION}:${DEMO_ENTITY_ID}:0x1111111111111111111111111111111111111111`, replica],
 				]),
 				height: INITIAL_HEIGHT,
+				lastHash: EMPTY_HASH,
 			};
 
 			const input: Input = {
@@ -272,7 +274,7 @@ describe('XLN Negative Path Tests', () => {
 						nonce: 0n,
 						from: '0x1111111111111111111111111111111111111111' as Address,
 						body: { message: 'test' },
-						sig: DUMMY_SIGNATURE as Hex,
+						sig: DUMMY_SIGNATURE,
 					},
 				],
 			};
@@ -298,7 +300,7 @@ describe('XLN Negative Path Tests', () => {
 				proposal: {
 					...createFrame(createEntityState(), 1n),
 					hash: '0x1111111111111111111111111111111111111111111111111111111111111111' as Hex,
-					sigs: new Map([['0x1111111111111111111111111111111111111111' as Address, DUMMY_SIGNATURE as Hex]]),
+					sigs: new Map([['0x1111111111111111111111111111111111111111' as Address, DUMMY_SIGNATURE]]),
 				},
 			};
 
@@ -324,7 +326,7 @@ describe('XLN Negative Path Tests', () => {
 				type: 'COMMIT' as const,
 				addrKey: `${DEMO_JURISDICTION}:${DEMO_ENTITY_ID}`,
 				frame: createFrame(createEntityState(), 5n), // Wrong height (should be 1)
-				hanko: DUMMY_SIGNATURE as Hex,
+				hanko: DUMMY_SIGNATURE,
 				signers: ['0x1111111111111111111111111111111111111111' as Address],
 			};
 
