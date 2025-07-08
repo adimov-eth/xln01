@@ -10,7 +10,7 @@
 		"forceConsistentCasingInFileNames": true,
 		"resolveJsonModule": true,
 		"types": ["bun-types", "jest"],
-		
+
 		/* Additional strict checks as per codestyle.md */
 		"exactOptionalPropertyTypes": false, // Too restrictive for current codebase
 		"noUncheckedIndexedAccess": false, // Requires extensive refactoring

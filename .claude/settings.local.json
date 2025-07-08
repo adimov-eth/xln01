@@ -1,6 +1,6 @@
 {
 	"permissions": {
-		"allow": ["Bash(rg:*)", "Bash(npx eslint:*)", "Bash(grep:*)"],
+		"allow": ["Bash(rg:*)", "Bash(npx eslint:*)", "Bash(grep:*)", "Bash(bun test:*)"],
 		"deny": []
 	}
 }

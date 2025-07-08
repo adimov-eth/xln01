@@ -22,7 +22,7 @@ const asBuffer = (value: RLPDecodedValue): Result<Buffer> => {
 	return ok(value);
 };
 
-const convertBigIntToBuffer = (n: UInt64) => {
+export const convertBigIntToBuffer = (n: UInt64) => {
 	if (n === 0n) return Buffer.alloc(0);
 	const hex = n.toString(16);
 	// make even length
@@ -78,7 +78,7 @@ export const encodeFrame = <S>(frame: Frame<S>): Buffer =>
 	Buffer.from(
 		rlp.encode([
 			convertBigIntToBuffer(frame.height),
-			frame.ts,
+			convertBigIntToBuffer(BigInt(frame.ts)),
 			frame.txs.map(encodeTransaction),
 			Buffer.from(canonical(frame.state)),
 		]),
@@ -191,7 +191,7 @@ export const encodeServerFrame = (frame: import('../types').ServerFrame): Buffer
 	Buffer.from(
 		rlp.encode([
 			convertBigIntToBuffer(frame.height),
-			frame.ts,
+			convertBigIntToBuffer(BigInt(frame.ts)),
 			frame.inputs.map(encodeInput),
 			hexToBuf(frame.root),
 			hexToBuf(frame.parent),
@@ -236,7 +236,7 @@ export const decodeServerFrame = (buffer: Buffer): Result<import('../types').Ser
 
 	const frameWithoutHash: import('../types').ServerFrame = {
 		height: convertBufferToBigInt(heightResult.value),
-		ts: Number(timestampResult.value.toString()),
+		ts: Number(convertBufferToBigInt(timestampResult.value)),
 		inputs: decodedInputs,
 		root: bufToHex(rootResult.value),
 		parent: bufToHex(parentResult.value),

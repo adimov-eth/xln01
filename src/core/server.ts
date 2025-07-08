@@ -19,12 +19,13 @@ export interface ApplyServerBlockResult {
 }
 
 const computeRoot = (replicas: Map<string, Replica>): Hex => {
-	// sorted array for determinism
+	// sorted array for determinism - state root must be invariant across replicas
 	const mapped = [...replicas.values()].map(r => ({ addr: r.address, state: r.last.state }));
 	// eslint-disable-next-line fp/no-mutating-methods
 	const sorted = [...mapped].sort((a, b) =>
 		(a.addr.jurisdiction + a.addr.entityId).localeCompare(b.addr.jurisdiction + b.addr.entityId),
 	);
+	Object.freeze(sorted);
 	return `0x${Buffer.from(keccak(canonical(sorted))).toString('hex')}`;
 };
 
@@ -66,8 +67,21 @@ export function applyServerBlock({ prev, batch, timestamp }: ApplyServerBlockPar
 				return { finalReplicas: newReplicas, allOutbox: acc.allOutbox };
 			}
 
-			const replica = acc.finalReplicas.get(key);
+			const replica =
+				acc.finalReplicas.get(key) ??
+				// Fallback – derive by addrKey + proposer (don't trust input.to blindly)
+				(() => {
+					const anyRep = [...acc.finalReplicas.values()].find(r => getAddrKey(r.address) === command.addrKey);
+					return anyRep ? acc.finalReplicas.get(`${command.addrKey}:${anyRep.proposer}`) : undefined;
+				})();
+
 			if (!replica) return acc;
+
+			/* quick‑fail for obviously bad COMMIT height (saves costly re‑execution) */
+			if (command.type === 'COMMIT' && command.frame.height !== replica.last.height + 1n) {
+				console.error('COMMIT height mismatch');
+				return acc;
+			}
 
 			/* ─── Apply the Entity state machine ─── */
 			const updatedReplica = applyCommand({ replica, command });
