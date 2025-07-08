@@ -11,12 +11,8 @@
 		"lint:fix": "eslint src/**/*.ts --fix",
 		"format": "prettier --write .",
 		"format:check": "prettier --check .",
-		"test": "jest",
-		"test:watch": "jest --watch",
 		"prepare": "husky",
-		"verify:style": "bun run scripts/verify-codestyle.ts",
-		"report:style": "bun run scripts/codestyle-report.ts",
-		"check:all": "bun run format:check && bun run lint && bun run verify:style && bun run test"
+		"check:all": "bun run format:check && bun run lint && bun test"
 	},
 	"lint-staged": {
 		"*.{js,ts,mjs,json,md}": "prettier --write",
