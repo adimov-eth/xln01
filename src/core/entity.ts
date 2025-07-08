@@ -9,13 +9,13 @@ import type {
 	Frame,
 	Hex,
 	ProposedFrame,
-	Quorum,
 	Replica,
 	Result,
 	TS,
 	Transaction,
 } from '../types';
 import { err, ok } from '../types';
+import { calculateQuorumPower } from '../utils/quorum';
 import { ADDR_TO_PUB } from './runtime';
 
 export interface ValidateCommitParams {
@@ -50,8 +50,6 @@ export const hashFrame = <T>(frame: Frame<T>): Hex => {
 const sortTransaction = (a: Transaction, b: Transaction): number =>
 	a.nonce < b.nonce ? -1 : a.nonce > b.nonce ? 1 : a.from.localeCompare(b.from);
 
-const getSharesOf = (address: Address, quorum: Quorum): bigint => quorum.members[address]?.shares ?? 0n;
-
 type Validator<T> = (params: T) => Result<T>;
 
 const checkHeight: Validator<ValidateCommitParams> = params =>
@@ -72,14 +70,16 @@ const checkStateReplay: Validator<ValidateCommitParams> = params => {
 
 const checkSigningPower: Validator<ValidateCommitParams> = params => {
 	const quorum = params.prev.state.quorum;
-	const totalPower = params.signers.reduce<bigint>((sum, signer) => sum + getSharesOf(signer, quorum), 0n);
+	const uniqueSigners = [...new Set(params.signers)];
+	const totalPower = calculateQuorumPower(quorum, uniqueSigners);
 	return totalPower >= quorum.threshold ? ok(params) : err(`Insufficient power: ${totalPower} < ${quorum.threshold}`);
 };
 
 const checkSignatures: Validator<ValidateCommitParams> = params => {
-	const pubKeys = params.signers.map(addr => ADDR_TO_PUB.get(addr)).filter((key): key is PubKey => key !== undefined);
+	const uniqueSigners = [...new Set(params.signers)];
+	const pubKeys = uniqueSigners.map(addr => ADDR_TO_PUB.get(addr)).filter((key): key is PubKey => key !== undefined);
 
-	if (pubKeys.length !== params.signers.length) {
+	if (pubKeys.length !== uniqueSigners.length) {
 		return err('Missing public keys for some signers');
 	}
 

@@ -2,8 +2,9 @@ import { keccak_256 as keccak } from '@noble/hashes/sha3';
 import { canonical } from '../codec/canonical';
 import { encodeServerFrame } from '../codec/rlp';
 import { DUMMY_SIGNATURE, EMPTY_HASH } from '../constants';
-import type { Address, Hex, Input, Quorum, Replica, ServerFrame, ServerState, TS } from '../types';
+import type { Address, Hex, Input, Replica, ServerFrame, ServerState, TS } from '../types';
 import { getAddrKey } from '../types';
+import { calculateQuorumPower } from '../utils/quorum';
 import { applyCommand } from './entity';
 
 export interface ApplyServerBlockParams {
@@ -28,10 +29,6 @@ const computeRoot = (replicas: Map<string, Replica>): Hex => {
 	Object.freeze(sorted);
 	return `0x${Buffer.from(keccak(canonical(sorted))).toString('hex')}`;
 };
-
-// replace calculatePower(): real shares
-const quorumPower = (q: Quorum, sigs: Map<Address, Hex>): bigint =>
-	[...sigs.keys()].reduce((sum, addr) => sum + (q.members[addr]?.shares ?? 0n), 0n);
 
 export function applyServerBlock({ prev, batch, timestamp }: ApplyServerBlockParams): ApplyServerBlockResult {
 	const { finalReplicas, allOutbox } = batch.reduce(
@@ -117,8 +114,8 @@ export function applyServerBlock({ prev, batch, timestamp }: ApplyServerBlockPar
 						if (updatedReplica.isAwaitingSignatures && updatedReplica.proposal) {
 							const proposal = updatedReplica.proposal;
 							const q = updatedReplica.last.state.quorum;
-							const prevPower = replica.proposal ? quorumPower(q, replica.proposal.sigs) : 0n;
-							const newPower = quorumPower(q, proposal.sigs);
+							const prevPower = replica.proposal ? calculateQuorumPower(q, replica.proposal.sigs) : 0n;
+							const newPower = calculateQuorumPower(q, proposal.sigs);
 							if (prevPower < q.threshold && newPower >= q.threshold) {
 								// Threshold just reached: proposer will broadcast COMMIT
 								// We need to send COMMIT to all replicas of this entity
