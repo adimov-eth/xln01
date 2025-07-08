@@ -1,6 +1,6 @@
 {
 	"permissions": {
-		"allow": ["Bash(rg:*)"],
+		"allow": ["Bash(rg:*)", "Bash(npx eslint:*)"],
 		"deny": []
 	}
 }

@@ -11,6 +11,7 @@ import {
 } from '../constants';
 import type { Command, Frame, Hex, Input, Result, Transaction, TxKind, UInt64 } from '../types';
 import { err, ok } from '../types';
+import { canonical } from './canonical';
 
 type RLPDecodedValue = Buffer | RLPDecodedValue[];
 
@@ -21,8 +22,12 @@ const asBuffer = (value: RLPDecodedValue): Result<Buffer> => {
 	return ok(value);
 };
 
-const convertBigIntToBuffer = (number: UInt64) =>
-	number === 0n ? Buffer.alloc(0) : Buffer.from(number.toString(16).padStart(2, '0'), 'hex');
+const convertBigIntToBuffer = (n: UInt64) => {
+	if (n === 0n) return Buffer.alloc(0);
+	const hex = n.toString(16);
+	// make even length
+	return Buffer.from(hex.length % 2 ? '0' + hex : hex, 'hex');
+};
 const convertBufferToBigInt = (buffer: Buffer): UInt64 =>
 	buffer.length === 0 ? 0n : BigInt(`0x${buffer.toString('hex')}`);
 
@@ -75,7 +80,7 @@ export const encodeFrame = <S>(frame: Frame<S>): Buffer =>
 			convertBigIntToBuffer(frame.height),
 			frame.ts,
 			frame.txs.map(encodeTransaction),
-			Buffer.from(JSON.stringify(frame.state)),
+			Buffer.from(canonical(frame.state)),
 		]),
 	);
 export const decodeFrame = <S>(buffer: Buffer): Result<Frame<S>> => {
@@ -119,7 +124,7 @@ export const decodeFrame = <S>(buffer: Buffer): Result<Frame<S>> => {
 			height: convertBufferToBigInt(heightResult.value),
 			ts: Number(timestampResult.value.toString()),
 			txs,
-			state: rlp.decode(stateResult.value) as S,
+			state: JSON.parse(stateResult.value.toString()) as S,
 		});
 	} catch (e) {
 		return err(`Failed to decode frame: ${String(e)}`);

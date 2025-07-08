@@ -29,6 +29,16 @@ Think of it as a **high-speed rail system** where:
 - Tickets (signatures) prove consensus among conductors
 - The destination ledger (blockchain) only records arrivals
 
+### Version 0.3 Improvements
+
+This implementation includes critical fixes for production readiness:
+
+- **Canonical JSON**: RFC 8785-compliant serialization ensures deterministic hashing across all JavaScript engines
+- **Pure BigInt Arithmetic**: Eliminates Number overflow risks for large nonces or amounts
+- **Weighted Voting**: Proper share-based consensus (not just signature counting)
+- **State Integrity**: Fixed RLP codec to correctly encode/decode frame states
+- **Deterministic Ordering**: Stable transaction and replica sorting
+
 ## Core Concepts
 
 ### 1. **Entity** - The Local Consensus Machine
@@ -85,6 +95,14 @@ A Hanko is a BLS aggregate signature that proves quorum agreement. Like a tradit
 │  • Computes Merkle roots    │ │  • Maintains quorum state   │
 │  • Pure functional          │ │  • Pure functional          │
 └─────────────────────────────┘ └─────────────────────────────┘
+                                 │
+                                 ▼
+              ┌─────────────────────────────┐
+              │      Codec Layer           │
+              │  • Canonical JSON (RFC 8785)│
+              │  • RLP encoding/decoding    │
+              │  • Deterministic hashing    │
+              └─────────────────────────────┘
 ```
 
 ### Layer Responsibilities
@@ -94,18 +112,26 @@ A Hanko is a BLS aggregate signature that proves quorum agreement. Like a tradit
    - No I/O, no randomness, no timestamps
    - Deterministic replay from genesis
    - Commands: `ADD_TX`, `PROPOSE`, `SIGN`, `COMMIT`
+   - Validates consensus rules and quorum thresholds
 
 2. **Server Layer** (`src/core/server.ts`)
    - Pure functional routing and aggregation
    - Maintains global view of all entities
    - Generates deterministic ServerFrames
-   - Ensures command delivery and ordering
+   - Computes canonical Merkle roots
+   - Uses voting shares (not just signature count) for consensus
 
 3. **Runtime Layer** (`src/core/runtime.ts`)
    - Handles all side effects
    - Fulfills cryptographic signatures
    - Manages persistence and networking
    - Provides tick-based execution
+
+4. **Codec Layer** (`src/codec/`)
+   - Canonical JSON serialization (RFC 8785)
+   - RLP encoding for frames and transactions
+   - Deterministic BigInt serialization
+   - Ensures cross-platform consistency
 
 ## Consensus Flow
 
@@ -199,10 +225,11 @@ interface Quorum {
 
 ### Determinism Rules
 
-1. **Transaction Ordering**: By `nonce` → `from` → `kind`
+1. **Transaction Ordering**: By `nonce` → `from` (pure bigint comparison)
 2. **Timestamp Handling**: Only at Server level, not Entity
 3. **State Computation**: Pure functions, no randomness
-4. **Hash Computation**: Canonical JSON with bigint→string
+4. **Hash Computation**: RFC 8785-style canonical JSON
+5. **Canonical Serialization**: Deterministic key ordering, bigint→string conversion
 
 ### Cryptographic Primitives
 
@@ -306,6 +333,34 @@ Entities operate independently:
 - Minimal coordination overhead
 - Jurisdiction-specific compliance
 - Scalable to many entities
+
+## Recent Improvements (v0.3)
+
+### Critical Fixes Applied
+
+1. **Deterministic Serialization**
+   - Implemented RFC 8785-style canonical JSON
+   - Fixed key ordering across JavaScript engines
+   - Proper BigInt to string conversion
+
+2. **Consensus Integrity**
+   - Fixed voting power calculation to use shares, not signature count
+   - Corrected RLP frame decoding (was using RLP on JSON data)
+   - Pure BigInt comparison in transaction sorting
+
+3. **Code Quality**
+   - Full TypeScript strict mode compliance
+   - ESLint functional programming rules enforced
+   - Comprehensive test coverage
+
+## Verification Strategy
+
+A comprehensive verification approach is documented in [Issue #5](https://github.com/adimov-eth/xln01/issues/5):
+
+- Property-based testing for invariants
+- Byzantine fault scenario testing
+- Formal verification preparation
+- Simulation framework for edge cases
 
 ## Future Extensions
 

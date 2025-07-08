@@ -1,7 +1,8 @@
 import { keccak_256 as keccak } from '@noble/hashes/sha3';
+import { canonical } from '../codec/canonical';
 import { encodeServerFrame } from '../codec/rlp';
 import { DUMMY_SIGNATURE } from '../constants';
-import type { Address, EntityState, Frame, Hex, Input, Replica, ServerFrame, ServerState, TS } from '../types';
+import type { Address, EntityState, Frame, Hex, Input, Quorum, Replica, ServerFrame, ServerState, TS } from '../types';
 import { getAddrKey } from '../types';
 import { applyCommand } from './entity';
 
@@ -18,19 +19,18 @@ export interface ApplyServerBlockResult {
 }
 
 const computeRoot = (replicas: Map<string, Replica>): Hex => {
-	const replacer = (_key: string, value: unknown) => (typeof value === 'bigint' ? value.toString() : value);
-
-	return `0x${Buffer.from(
-		keccak(
-			JSON.stringify(
-				[...replicas.values()].map(r => ({ addr: r.address, state: r.last.state })),
-				replacer,
-			),
-		),
-	).toString('hex')}`;
+	// sorted array for determinism
+	const mapped = [...replicas.values()].map(r => ({ addr: r.address, state: r.last.state }));
+	// eslint-disable-next-line fp/no-mutating-methods
+	const sorted = [...mapped].sort((a, b) =>
+		(a.addr.jurisdiction + a.addr.entityId).localeCompare(b.addr.jurisdiction + b.addr.entityId),
+	);
+	return `0x${Buffer.from(keccak(canonical(sorted))).toString('hex')}`;
 };
 
-const calculatePower = (signatures: Map<Address, string>) => signatures.size;
+// replace calculatePower(): real shares
+const quorumPower = (q: Quorum, sigs: Map<Address, Hex>): bigint =>
+	[...sigs.keys()].reduce((sum, addr) => sum + (q.members[addr]?.shares ?? 0n), 0n);
 
 export function applyServerBlock({ prev, batch, timestamp }: ApplyServerBlockParams): ApplyServerBlockResult {
 	const { finalReplicas, allOutbox } = batch.reduce(
@@ -101,8 +101,8 @@ export function applyServerBlock({ prev, batch, timestamp }: ApplyServerBlockPar
 						if (updatedReplica.isAwaitingSignatures && updatedReplica.proposal) {
 							const proposal = updatedReplica.proposal;
 							const q = updatedReplica.last.state.quorum;
-							const prevPower = replica.proposal ? calculatePower(replica.proposal.sigs) : 0;
-							const newPower = calculatePower(proposal.sigs);
+							const prevPower = replica.proposal ? quorumPower(q, replica.proposal.sigs) : 0n;
+							const newPower = quorumPower(q, proposal.sigs);
 							if (prevPower < q.threshold && newPower >= q.threshold) {
 								// Threshold just reached: proposer will broadcast COMMIT
 								// We need to send COMMIT to all replicas of this entity

@@ -1,4 +1,5 @@
 import { keccak_256 as keccak } from '@noble/hashes/sha3';
+import { canonical } from '../codec/canonical';
 import { DUMMY_SIGNATURE } from '../constants';
 import { type PubKey, verifyAggregate } from '../crypto/bls';
 import type {
@@ -43,12 +44,11 @@ export interface ApplyCommandParams {
 
 /** Compute canonical hash of a frame's content using keccak256. */
 export const hashFrame = <T>(frame: Frame<T>): Hex => {
-	const replacer = (_key: string, value: unknown) => (typeof value === 'bigint' ? value.toString() : value);
-	return `0x${Buffer.from(keccak(JSON.stringify(frame, replacer))).toString('hex')}`;
+	return `0x${Buffer.from(keccak(canonical(frame))).toString('hex')}`;
 };
 
 const sortTransaction = (a: Transaction, b: Transaction): number =>
-	a.nonce !== b.nonce ? Number(a.nonce - b.nonce) : a.from !== b.from ? a.from.localeCompare(b.from) : 0;
+	a.nonce < b.nonce ? -1 : a.nonce > b.nonce ? 1 : a.from.localeCompare(b.from);
 
 const getSharesOf = (address: Address, quorum: Quorum): bigint => quorum.members[address]?.shares ?? 0n;
 
