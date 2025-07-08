@@ -1,7 +1,7 @@
-import { DEMO_ENTITY_ID, DEMO_JURISDICTION, INITIAL_HEIGHT } from '../constants';
+import { DEMO_ENTITY_ID, DEMO_JURISDICTION, QUORUM_THRESHOLD } from '../constants';
 import { createRuntime } from '../core/runtime';
 import { sign } from '../crypto/bls';
-import { Input, Transaction } from '../types';
+import type { Address, EntityState, Frame, Input, Quorum, Replica, SignerRecord, Transaction } from '../types';
 
 describe('XLN Consensus Snapshot Test', () => {
 	test('single tick happy path produces expected state', () => {
@@ -10,10 +10,55 @@ describe('XLN Consensus Snapshot Test', () => {
 		const fromAddr = runtime.ADDRS[0];
 		const privKey = runtime.PRIVS[0];
 
+		// Helper to create the genesis replica for IMPORT
+		const createGenesisReplica = (): Replica => {
+			const members = runtime.ADDRS.reduce<Record<Address, SignerRecord>>(
+				(acc, addr) => ({
+					...acc,
+					[addr as Address]: { nonce: 0n, shares: 100n },
+				}),
+				{},
+			);
+
+			const quorum: Quorum = {
+				threshold: BigInt(QUORUM_THRESHOLD),
+				members,
+			};
+
+			const initState: EntityState = { quorum, chat: [] };
+			const initFrame: Frame<EntityState> = {
+				height: 0n,
+				ts: 0,
+				txs: [],
+				state: initState,
+			};
+
+			return {
+				address: { jurisdiction: DEMO_JURISDICTION, entityId: DEMO_ENTITY_ID },
+				proposer: runtime.ADDRS[0] as Address,
+				isAwaitingSignatures: false,
+				mempool: [],
+				last: initFrame,
+			};
+		};
+
+		// Import the entity first
+		const importInput: Input = {
+			from: fromAddr as Address,
+			to: fromAddr as Address,
+			cmd: {
+				type: 'IMPORT',
+				replica: createGenesisReplica(),
+			},
+		};
+
+		// Process IMPORT command
+		runtime.tick({ now: Date.now(), incoming: [importInput] });
+
 		// Create and sign a chat transaction
 		const baseChatTx: Omit<Transaction, 'sig'> = {
 			kind: 'chat',
-			nonce: INITIAL_HEIGHT,
+			nonce: 0n, // Starting nonce after import
 			from: fromAddr as `0x${string}`,
 			body: { message: 'Test message' },
 		};

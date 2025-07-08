@@ -8,7 +8,7 @@ import {
 } from './constants';
 import { createRuntime } from './core/runtime';
 import { sign } from './crypto/bls';
-import { Input, Transaction } from './types';
+import type { Address, EntityState, Frame, Input, Quorum, Replica, SignerRecord, Transaction } from './types';
 
 // Demo script showing multiple consensus rounds
 
@@ -18,6 +18,38 @@ const runtime = createRuntime();
 // Use the addresses and keys from the runtime
 const DEMO_ADDRS = runtime.ADDRS;
 const DEMO_PRIVS = runtime.PRIVS;
+
+// Helper to create the genesis replica for IMPORT
+const createGenesisReplica = (): Replica => {
+	const members = DEMO_ADDRS.reduce<Record<Address, SignerRecord>>(
+		(acc, addr) => ({
+			...acc,
+			[addr as Address]: { nonce: 0n, shares: 100n },
+		}),
+		{},
+	);
+
+	const quorum: Quorum = {
+		threshold: BigInt(QUORUM_THRESHOLD),
+		members,
+	};
+
+	const initState: EntityState = { quorum, chat: [] };
+	const initFrame: Frame<EntityState> = {
+		height: 0n,
+		ts: 0,
+		txs: [],
+		state: initState,
+	};
+
+	return {
+		address: { jurisdiction: DEMO_JURISDICTION, entityId: DEMO_ENTITY_ID },
+		proposer: DEMO_ADDRS[0] as Address,
+		isAwaitingSignatures: false,
+		mempool: [],
+		last: initFrame,
+	};
+};
 
 // Helper to create signed transactions
 const createSignedTransaction = (fromIndex: number, message: string): Transaction => {
@@ -56,9 +88,32 @@ const createSignedTransaction = (fromIndex: number, message: string): Transactio
 
 	const baseTime = Date.now();
 
+	console.log('=== BOOTSTRAPPING ENTITY VIA IMPORT ===\n');
+
+	// Create IMPORT command to bootstrap the entity
+	const importInput: Input = {
+		from: DEMO_ADDRS[0] as Address,
+		to: DEMO_ADDRS[0] as Address,
+		cmd: {
+			type: 'IMPORT',
+			replica: createGenesisReplica(),
+		},
+	};
+
+	// Process IMPORT command
+	console.log('Tick 0: Processing IMPORT command...');
+	const { frame: importFrame } = runtime.tick({
+		now: baseTime,
+		incoming: [importInput],
+	});
+
+	console.log(`  → Entity imported at height ${importFrame.height}`);
+	console.log(`  → Created ${DEMO_ADDRS.length} replicas (one per signer)`);
+	console.log(`  → Each replica has its own proposer\n`);
+
 	// Helper to run a consensus round
 	const runConsensusRound = (transactions: Transaction[], currentTick: number): number => {
-		console.log(`\n━━━ CONSENSUS ROUND ${Math.floor(currentTick / 4) + 1} ━━━`);
+		console.log(`\n━━━ CONSENSUS ROUND ${Math.floor((currentTick - 1) / 4) + 1} ━━━`);
 
 		const addTxInputs: Input[] = transactions.map(tx => ({
 			from: tx.from,
@@ -111,7 +166,7 @@ const createSignedTransaction = (fromIndex: number, message: string): Transactio
 
 	// Round 1: Single message from first signer
 	const tx1 = createSignedTransaction(0, 'Hello, XLN! This is the genesis message.');
-	const tickAfterRound1 = runConsensusRound([tx1], 0);
+	const tickAfterRound1 = runConsensusRound([tx1], 1);
 
 	// Round 2: Multiple messages from different signers
 	const tx2 = createSignedTransaction(1, 'Greetings from signer 2!');

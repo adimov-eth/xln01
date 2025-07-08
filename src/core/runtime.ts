@@ -1,17 +1,13 @@
 import {
 	BLS_SIGNATURE_LENGTH,
-	DEFAULT_SHARES_PER_SIGNER,
-	DEMO_ENTITY_ID,
-	DEMO_JURISDICTION,
 	DUMMY_SIGNATURE,
 	EMPTY_HASH,
 	HASH_DISPLAY_LENGTH,
 	INITIAL_HEIGHT,
-	QUORUM_THRESHOLD,
 	TOTAL_SIGNERS,
 } from '../constants';
 import { type PubKey, aggregate, deriveAddress, getPublicKey, randomPriv, sign } from '../crypto/bls';
-import type { Address, EntityState, Frame, Hex, Input, Quorum, Replica, ServerFrame } from '../types';
+import type { Address, Hex, Input, Replica, ServerFrame } from '../types';
 import { applyServerBlock } from './server';
 
 // Generate signers with derived keys and addresses
@@ -27,38 +23,6 @@ const generateSigners = (count: number) => {
 const { privs: PRIVS, pubs: PUBS, addrs: ADDRS, privHexes: PRIV_HEXES } = generateSigners(TOTAL_SIGNERS);
 
 export const ADDR_TO_PUB = new Map<string, PubKey>(ADDRS.map((addr, i) => [addr, PUBS[i]]));
-
-// Create a member with default values
-const genesisEntity = (): Replica => {
-	const members = ADDRS.reduce<Record<Address, { nonce: bigint; shares: bigint }>>(
-		(acc, addr) => ({
-			...acc,
-			[addr]: { nonce: INITIAL_HEIGHT, shares: BigInt(DEFAULT_SHARES_PER_SIGNER) },
-		}),
-		{},
-	);
-
-	const quorum: Quorum = {
-		threshold: BigInt(QUORUM_THRESHOLD),
-		members,
-	};
-
-	const initState: EntityState = { quorum, chat: [] };
-	const initFrame: Frame<EntityState> = {
-		height: INITIAL_HEIGHT,
-		ts: 0,
-		txs: [],
-		state: initState,
-	};
-
-	return {
-		address: { jurisdiction: DEMO_JURISDICTION, entityId: DEMO_ENTITY_ID },
-		proposer: ADDRS[0],
-		isAwaitingSignatures: false,
-		mempool: [],
-		last: initFrame,
-	};
-};
 
 export interface TickParams {
 	now: number;
@@ -78,11 +42,7 @@ export interface Runtime {
 }
 
 export const createRuntime = (): Runtime => {
-	const base = genesisEntity();
-	const fixedProposer = ADDRS[0];
-	const initialReplicas = new Map(
-		ADDRS.map(signerAddr => [`demo:chat:${signerAddr}`, { ...base, proposer: fixedProposer } as Replica]),
-	);
+	const initialReplicas = new Map<string, Replica>();
 
 	const stateRef = {
 		current: {
