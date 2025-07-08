@@ -1,5 +1,5 @@
 import { keccak_256 as keccak } from '@noble/hashes/sha3';
-import { canonical } from '../codec/canonical';
+import { canonical } from '../codec/rlp';
 import { DUMMY_SIGNATURE } from '../constants';
 import { type PubKey, verifyAggregate } from '../crypto/bls';
 import type {
@@ -9,13 +9,13 @@ import type {
 	Frame,
 	Hex,
 	ProposedFrame,
+	Quorum,
 	Replica,
 	Result,
 	TS,
 	Transaction,
 } from '../types';
 import { err, ok } from '../types';
-import { calculateQuorumPower } from '../utils/quorum';
 import { ADDR_TO_PUB } from './runtime';
 
 export interface ValidateCommitParams {
@@ -41,6 +41,11 @@ export interface ApplyCommandParams {
 	replica: Replica;
 	command: Command;
 }
+
+export const calculateQuorumPower = (quorum: Quorum, signers: Address[] | Map<Address, Hex>): bigint => {
+	const addresses = Array.isArray(signers) ? signers : [...signers.keys()];
+	return addresses.reduce((sum, addr) => sum + (quorum.members[addr]?.shares ?? 0n), 0n);
+};
 
 /** Compute canonical hash of a frame's content using keccak256. */
 export const hashFrame = <T>(frame: Frame<T>): Hex => {

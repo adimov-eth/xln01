@@ -8,10 +8,44 @@ import {
 	SERVER_FRAME_FIELD_COUNT,
 	TRANSACTION_FIELD_COUNT,
 } from '../constants';
-import type { Command, Frame, Input, Result, Transaction, TxKind, UInt64 } from '../types';
+import type { Command, Frame, Hex, Input, Result, Transaction, TxKind, UInt64 } from '../types';
 import { err, ok } from '../types';
-import { canonical } from './canonical';
-import { bufToHex, hexToBuf } from './hex';
+
+/** RFC 8785-style canonical JSON (only what we need) */
+export const canonical = (value: unknown): string => {
+	const walk = (v: unknown, stack: unknown[]): unknown => {
+		if (typeof v === 'bigint') {
+			return v.toString();
+		}
+		if (v && typeof v === 'object') {
+			if (Array.isArray(v)) {
+				return v.map(item => walk(item, stack));
+			}
+			// prevent cycles
+			if (stack.includes(v)) {
+				return '[Circular]';
+			}
+			const newStack = [...stack, v];
+			const obj = v as Record<string, unknown>;
+			const keys = Object.keys(obj);
+			// eslint-disable-next-line fp/no-mutating-methods
+			const sortedKeys = [...keys].sort();
+			return sortedKeys.reduce(
+				(acc, k) => ({
+					...acc,
+					[k]: walk(obj[k], newStack),
+				}),
+				{} as Record<string, unknown>,
+			);
+		}
+		return v;
+	};
+	return JSON.stringify(walk(value, []));
+};
+
+export const hexToBuf = (hex: Hex): Buffer => Buffer.from(hex.startsWith('0x') ? hex.slice(2) : hex, 'hex');
+
+export const bufToHex = (buf: Buffer): Hex => `0x${buf.toString('hex')}`;
 
 type RLPDecodedValue = Buffer | RLPDecodedValue[];
 

@@ -1,11 +1,9 @@
 import { keccak_256 as keccak } from '@noble/hashes/sha3';
-import { canonical } from '../codec/canonical';
-import { encodeServerFrame } from '../codec/rlp';
+import { canonical, encodeServerFrame } from '../codec/rlp';
 import { DUMMY_SIGNATURE, EMPTY_HASH } from '../constants';
 import type { Address, Hex, Input, Replica, ServerFrame, ServerState, TS } from '../types';
 import { getAddrKey } from '../types';
-import { calculateQuorumPower } from '../utils/quorum';
-import { applyCommand } from './entity';
+import { applyCommand, calculateQuorumPower } from './entity';
 
 export interface ApplyServerBlockParams {
 	prev: ServerState;
