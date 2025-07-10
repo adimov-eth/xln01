@@ -782,7 +782,7 @@ const tick = ({ now, incoming }: TickParams): TickResult => {
 		outbox,
 	} = applyServerBlock({
 		prev: stateRef.current,
-		batch: incoming,
+		inputs: incoming,
 		timestamp: now,
 	});
 
@@ -823,18 +823,19 @@ ServerFrames provide a global snapshot of all entities at a specific tick:
 interface ServerFrame {
 	height: bigint; // Monotonically increasing counter
 	ts: TimestampMs; // Unix timestamp in milliseconds
-	batch: Input[]; // All inputs processed this tick
+	inputs: Input[]; // All inputs processed this tick
 	root: Hex; // Merkle root of all entity states
-	parentHash: Hex; // Hash of previous ServerFrame
+	parent: Hex; // Hash of previous ServerFrame
+	hash: Hex; // Hash of this ServerFrame (computed via keccak256)
 }
 ```
 
 The server creates a new ServerFrame every tick:
 
 ```typescript
-export const applyServerBlock = ({ prev, batch, timestamp }: ApplyBlockParams): ApplyBlockResult => {
+export const applyServerBlock = ({ prev, inputs, timestamp }: ApplyBlockParams): ApplyBlockResult => {
 	// Process all inputs and collect entity updates
-	const { nextReplicas, allOutbox } = batch.reduce(
+	const { nextReplicas, allOutbox } = inputs.reduce(
 		(acc, input) => {
 			const result = applyServerMessage({
 				replicas: acc.nextReplicas,
@@ -864,9 +865,9 @@ export const applyServerBlock = ({ prev, batch, timestamp }: ApplyBlockParams): 
 	const frame: ServerFrame = {
 		height: prev.height + 1n,
 		ts: timestamp,
-		batch,
+		inputs,
 		root,
-		parentHash: prev.lastHash,
+		parent: prev.lastHash,
 	};
 
 	return {
@@ -886,7 +887,7 @@ export const applyServerBlock = ({ prev, batch, timestamp }: ApplyBlockParams): 
 - Processes all inputs in order
 - Updates all affected replicas
 - Computes Merkle root for efficient verification
-- Links to previous frame via parentHash
+- Links to previous frame via parent hash
 - Returns outbox of generated messages
 
 ### Message Routing
