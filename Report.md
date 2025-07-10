@@ -221,15 +221,16 @@ const { frame: importFrame } = runtime.tick({
 
 1. Server receives the IMPORT command
 2. Creates 5 replicas (one per signer) from the genesis template
-3. All replicas agree on the same proposer (DEMO_ADDRS[0] for simplicity)
-4. All replicas start with identical state
+3. Each replica's `proposer` field is set to its own signer address
+4. All replicas start with identical state (except for the proposer field)
 5. System is now ready to process transactions
 
 **Note on Proposer Selection:**
 
-- All replicas of an entity MUST agree on who the current proposer is
-- In this demo, the first signer (DEMO_ADDRS[0]) is always the proposer
-- Future implementations could move proposer to entity state and implement rotation logic
+- In the current implementation, each replica has its own address as the `proposer` field
+- However, since all transactions are routed to the first signer's replica (DEMO_ADDRS[0]), only that replica ever initiates proposals
+- This effectively makes the first signer the sole proposer for the demo, even though each replica technically could propose
+- Future implementations should move proposer to entity state and implement proper rotation or leader election logic to ensure all replicas agree on a single proposer
 
 ### 3. Transaction Creation and Signing
 
@@ -1141,16 +1142,21 @@ interface SignerRecord {
 
 ### Codec Layer
 
-The system uses a two-step approach for deterministic hashing:
+The system uses different encoding methods for different types of hashing:
 
-1. **Canonical JSON**: The `canonical()` function converts values to a deterministic JSON string following RFC 8785 principles:
-   - Object keys are sorted alphabetically
-   - BigInts are converted to strings
-   - Circular references are handled
-2. **Keccak Hashing**: The canonical JSON is then hashed using keccak256
+1. **Entity Frames**: Use canonical JSON encoding followed by keccak256 hashing
+2. **Server Frames**: Use RLP encoding followed by keccak256 hashing (as of v0.4)
+
+#### Canonical JSON (for Entity Frames)
+
+The `canonical()` function converts values to a deterministic JSON string following RFC 8785 principles:
+
+- Object keys are sorted alphabetically
+- BigInts are converted to strings
+- Circular references are handled
 
 ```typescript
-// Canonical encoding creates deterministic JSON (not RLP)
+// Canonical encoding creates deterministic JSON
 export const canonical = (value: unknown): string => {
 	const walk = (v: unknown, stack: unknown[]): unknown => {
 		if (typeof v === 'bigint') {
@@ -1175,10 +1181,37 @@ export const canonical = (value: unknown): string => {
 	return JSON.stringify(walk(value, []));
 };
 
-// Frame hashing uses canonical JSON + keccak256
+// Entity frame hashing uses canonical JSON + keccak256
 export const hashFrame = <TState>(frame: Frame<TState>): Hex => {
 	return `0x${Buffer.from(keccak(canonical(frame))).toString('hex')}`;
 };
 ```
 
-**Note**: While the codebase includes RLP encoding/decoding utilities for future use (e.g., for network serialization), the current implementation uses canonical JSON for hashing to ensure deterministic state agreement across all nodes.
+#### RLP Encoding (for Server Frames)
+
+Server frames use RLP (Recursive Length Prefix) encoding for deterministic binary serialization:
+
+```typescript
+// Server frame hashing uses RLP encoding + keccak256
+const frame: ServerFrame = {
+	height: newHeight,
+	ts: timestamp,
+	inputs,
+	root: rootHash,
+	parent: prev.lastHash ?? EMPTY_HASH,
+	hash: `0x${Buffer.from(
+		keccak(
+			encodeServerFrame({
+				height: newHeight,
+				ts: timestamp,
+				inputs,
+				root: rootHash,
+				parent: prev.lastHash ?? EMPTY_HASH,
+				hash: DUMMY_SIGNATURE,
+			}),
+		),
+	).toString('hex')}`,
+};
+```
+
+The RLP encoding handles BigInts and timestamps carefully to ensure deterministic binary representation across all nodes. This enhancement in v0.4 provides more efficient binary serialization for server-level consensus data.
