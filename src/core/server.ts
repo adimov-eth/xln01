@@ -35,16 +35,18 @@ export function applyServerBlock({ prev, batch, timestamp }: ApplyServerBlockPar
 			/* Determine routing key.
 			   If the command is entity-specific, route to the Replica that should handle it.
 			   We use addrKey (jurisdiction:entity) plus signer's address for uniqueness when needed. */
-			const signerPart =
-				command.type === 'ADD_TX'
-					? input.to // Route to the intended recipient (proposer)
-					: command.type === 'SIGN'
-						? input.to // Route to the proposer (recipient)
-						: command.type === 'PROPOSE'
-							? input.from // Use the sender as the proposer
-							: command.type === 'COMMIT'
-								? input.to // Route to the recipient
-								: '';
+			const signerPart = (() => {
+				switch (command.type) {
+					case 'ADD_TX':
+					case 'SIGN':
+					case 'COMMIT':
+						return input.to;
+					case 'PROPOSE':
+						return input.from;
+					case 'IMPORT':
+						return '';
+				}
+			})();
 
 			const key = command.type === 'IMPORT' ? '' : command.addrKey + (signerPart ? ':' + signerPart : '');
 
