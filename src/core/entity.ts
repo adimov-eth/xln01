@@ -8,6 +8,7 @@ import type {
 	EntityState,
 	Frame,
 	Hex,
+	Input,
 	ProposedFrame,
 	Quorum,
 	Replica,
@@ -40,6 +41,11 @@ export interface ExecFrameParams {
 export interface ApplyCommandParams {
 	replica: Replica;
 	command: Command;
+}
+
+export interface ApplyCommandResult {
+	replica: Replica;
+	outbox: Input[];
 }
 
 export const calculateQuorumPower = (quorum: Quorum, signers: Address[] | Map<Address, Hex>): bigint => {
@@ -155,19 +161,19 @@ export const execFrame = ({ prev, transactions, timestamp }: ExecFrameParams): R
 		: finalStateResult;
 };
 
-type CommandHandler<T extends Command = Command> = (replica: Replica, command: T) => Replica;
+type CommandHandler<T extends Command = Command> = (replica: Replica, command: T) => ApplyCommandResult;
 
 const handleAddTx: CommandHandler = (replica, command) => {
-	if (command.type !== 'ADD_TX') return replica;
-	if (replica.mempool.some(t => t.sig === command.tx.sig)) return replica;
-	return { ...replica, mempool: [...replica.mempool, command.tx] };
+	if (command.type !== 'ADD_TX') return { replica, outbox: [] };
+	if (replica.mempool.some(t => t.sig === command.tx.sig)) return { replica, outbox: [] };
+	return { replica: { ...replica, mempool: [...replica.mempool, command.tx] }, outbox: [] };
 };
 
 const handlePropose: CommandHandler = (replica, command) => {
-	if (command.type !== 'PROPOSE') return replica;
+	if (command.type !== 'PROPOSE') return { replica, outbox: [] };
 
 	if (replica.isAwaitingSignatures || replica.mempool.length === 0) {
-		return replica;
+		return { replica, outbox: [] };
 	}
 
 	const frameResult = execFrame({
@@ -178,7 +184,7 @@ const handlePropose: CommandHandler = (replica, command) => {
 
 	if (!frameResult.ok) {
 		console.log(`PROPOSE failed: ${frameResult.error}`);
-		return replica;
+		return { replica, outbox: [] };
 	}
 
 	const frame = frameResult.value;
@@ -194,36 +200,82 @@ const handlePropose: CommandHandler = (replica, command) => {
 				: new Map<Address, Hex>(),
 	};
 
-	return {
+	const updatedReplica = {
 		...replica,
 		mempool: [],
 		isAwaitingSignatures: true,
 		proposal,
 	};
+
+	// Generate SIGN requests for all quorum members
+	const outbox: Input[] = Object.keys(quorum.members).map(s => ({
+		from: s as Address,
+		to: replica.proposer,
+		cmd: {
+			type: 'SIGN' as const,
+			addrKey: command.addrKey,
+			signer: s as Address,
+			frameHash: proposal.hash,
+			sig: DUMMY_SIGNATURE,
+		},
+	}));
+
+	return { replica: updatedReplica, outbox };
 };
 
 const handleSign: CommandHandler = (replica, command) => {
-	if (command.type !== 'SIGN') return replica;
+	if (command.type !== 'SIGN') return { replica, outbox: [] };
 
 	const { proposal, isAwaitingSignatures, last } = replica;
-	if (!isAwaitingSignatures || !proposal) return replica;
+	if (!isAwaitingSignatures || !proposal) return { replica, outbox: [] };
 
 	const { frameHash, signer, sig } = command;
-	if (frameHash !== proposal.hash) return replica;
-	if (!last.state.quorum.members[signer]) return replica;
-	if (proposal.sigs.has(signer)) return replica;
+	if (frameHash !== proposal.hash) return { replica, outbox: [] };
+	if (!last.state.quorum.members[signer]) return { replica, outbox: [] };
+	if (proposal.sigs.has(signer)) return { replica, outbox: [] };
 
-	return {
-		...replica,
-		proposal: {
-			...proposal,
-			sigs: new Map(proposal.sigs).set(signer, sig),
-		},
+	const updatedProposal = {
+		...proposal,
+		sigs: new Map(proposal.sigs).set(signer, sig),
 	};
+
+	const updatedReplica = {
+		...replica,
+		proposal: updatedProposal,
+	};
+
+	// Check if threshold is reached
+	const quorum = last.state.quorum;
+	const prevPower = calculateQuorumPower(quorum, proposal.sigs);
+	const newPower = calculateQuorumPower(quorum, updatedProposal.sigs);
+
+	if (prevPower < quorum.threshold && newPower >= quorum.threshold) {
+		// Threshold reached: generate COMMIT commands for all replicas
+		const outbox: Input[] = Object.keys(quorum.members).map(signerAddr => ({
+			from: replica.proposer,
+			to: signerAddr as Address,
+			cmd: {
+				type: 'COMMIT' as const,
+				addrKey: command.addrKey,
+				hanko: DUMMY_SIGNATURE,
+				frame: {
+					height: updatedProposal.height,
+					ts: updatedProposal.ts,
+					txs: updatedProposal.txs,
+					state: updatedProposal.state,
+				},
+				signers: [],
+				_sigs: Object.fromEntries(updatedProposal.sigs),
+			},
+		}));
+		return { replica: updatedReplica, outbox };
+	}
+
+	return { replica: updatedReplica, outbox: [] };
 };
 
 const handleCommit: CommandHandler = (replica, command) => {
-	if (command.type !== 'COMMIT') return replica;
+	if (command.type !== 'COMMIT') return { replica, outbox: [] };
 
 	const isValid = validateCommit({
 		frame: command.frame,
@@ -232,16 +284,19 @@ const handleCommit: CommandHandler = (replica, command) => {
 		signers: command.signers,
 	});
 
-	if (!isValid) return replica;
+	if (!isValid) return { replica, outbox: [] };
 
 	const newMempool = replica.mempool.filter(tx => !command.frame.txs.some(c => c.sig === tx.sig));
 
 	return {
-		...replica,
-		last: command.frame,
-		mempool: newMempool,
-		isAwaitingSignatures: false,
-		proposal: undefined,
+		replica: {
+			...replica,
+			last: command.frame,
+			mempool: newMempool,
+			isAwaitingSignatures: false,
+			proposal: undefined,
+		},
+		outbox: [],
 	};
 };
 
@@ -250,11 +305,11 @@ const commandHandlers: Record<Command['type'], CommandHandler> = {
 	PROPOSE: handlePropose,
 	SIGN: handleSign,
 	COMMIT: handleCommit,
-	IMPORT: replica => replica, // Handled at server level
+	IMPORT: replica => ({ replica, outbox: [] }), // Handled at server level
 };
 
-/** Apply a high-level command to a replica's state. Returns a new Replica state (no mutation). */
-export const applyCommand = ({ replica, command }: ApplyCommandParams): Replica => {
+/** Apply a high-level command to a replica's state. Returns a new Replica state and outbox (no mutation). */
+export const applyCommand = ({ replica, command }: ApplyCommandParams): ApplyCommandResult => {
 	const handler = commandHandlers[command.type];
-	return handler ? handler(replica, command) : replica;
+	return handler ? handler(replica, command) : { replica, outbox: [] };
 };

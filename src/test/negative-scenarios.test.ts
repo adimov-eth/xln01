@@ -97,8 +97,8 @@ describe('XLN Negative Path Tests', () => {
 			};
 
 			const result = applyCommand({ replica, command });
-			expect(result.isAwaitingSignatures).toBe(false);
-			expect(result.proposal).toBeUndefined();
+			expect(result.replica.isAwaitingSignatures).toBe(false);
+			expect(result.replica.proposal).toBeUndefined();
 		});
 
 		it('should ignore SIGN with mismatched frame hash', () => {
@@ -122,7 +122,7 @@ describe('XLN Negative Path Tests', () => {
 			};
 
 			const result = applyCommand({ replica, command });
-			expect(result.proposal?.sigs.size).toBe(0);
+			expect(result.replica.proposal?.sigs.size).toBe(0);
 		});
 
 		it('should ignore SIGN from non-quorum member', () => {
@@ -146,7 +146,7 @@ describe('XLN Negative Path Tests', () => {
 			};
 
 			const result = applyCommand({ replica, command });
-			expect(result.proposal?.sigs.size).toBe(0);
+			expect(result.replica.proposal?.sigs.size).toBe(0);
 		});
 
 		it('should propagate frame execution errors', () => {
@@ -288,8 +288,8 @@ describe('XLN Negative Path Tests', () => {
 			const result = applyCommand({ replica, command });
 
 			// Should seed proposer's signature for single-signer quorum
-			expect(result.proposal?.sigs.has('0x1111111111111111111111111111111111111111')).toBe(true);
-			expect(result.proposal?.sigs.get('0x1111111111111111111111111111111111111111')).toBe(DUMMY_SIGNATURE);
+			expect(result.replica.proposal?.sigs.has('0x1111111111111111111111111111111111111111')).toBe(true);
+			expect(result.replica.proposal?.sigs.get('0x1111111111111111111111111111111111111111')).toBe(DUMMY_SIGNATURE);
 		});
 
 		it('should not double-sign the same proposal', () => {
@@ -315,8 +315,8 @@ describe('XLN Negative Path Tests', () => {
 			const result = applyCommand({ replica, command });
 
 			// Should still have only one signature
-			expect(result.proposal?.sigs.size).toBe(1);
-			expect(result.proposal?.sigs.get('0x1111111111111111111111111111111111111111')).toBe(DUMMY_SIGNATURE); // Original sig unchanged
+			expect(result.replica.proposal?.sigs.size).toBe(1);
+			expect(result.replica.proposal?.sigs.get('0x1111111111111111111111111111111111111111')).toBe(DUMMY_SIGNATURE); // Original sig unchanged
 		});
 
 		it('should handle COMMIT validation failures', () => {
@@ -333,8 +333,8 @@ describe('XLN Negative Path Tests', () => {
 			const result = applyCommand({ replica, command });
 
 			// State should remain unchanged
-			expect(result.last.height).toBe(0n);
-			expect(result.isAwaitingSignatures).toBe(false);
+			expect(result.replica.last.height).toBe(0n);
+			expect(result.replica.isAwaitingSignatures).toBe(false);
 		});
 	});
 });

@@ -10,7 +10,6 @@ import { type PubKey, aggregate, deriveAddress, getPublicKey, randomPriv, sign }
 import type { Address, Hex, Input, Replica, ServerFrame } from '../types';
 import { applyServerBlock } from './server';
 
-// Generate signers with derived keys and addresses
 const generateSigners = (count: number) => {
 	const privs = Array.from({ length: count }, randomPriv);
 	const pubs = privs.map(getPublicKey);
@@ -56,7 +55,6 @@ export const createRuntime = (): Runtime => {
 		return new Map(stateRef.current.replicas);
 	};
 
-	// Helper functions for signature processing
 	const extractSignatures = (sigs: Map<Address, Hex> | Record<string, Hex> | undefined): [Hex[], Address[]] => {
 		if (!sigs) return [[], []];
 

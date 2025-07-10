@@ -3,7 +3,7 @@ import { canonical, encodeServerFrame } from '../codec/rlp';
 import { DUMMY_SIGNATURE, EMPTY_HASH } from '../constants';
 import type { Address, Hex, Input, Replica, ServerFrame, ServerState, TS } from '../types';
 import { getAddrKey } from '../types';
-import { applyCommand, calculateQuorumPower } from './entity';
+import { applyCommand } from './entity';
 
 export interface ApplyServerBlockParams {
 	prev: ServerState;
@@ -79,78 +79,14 @@ export function applyServerBlock({ prev, batch, timestamp }: ApplyServerBlockPar
 			}
 
 			/* ─── Apply the Entity state machine ─── */
-			const updatedReplica = applyCommand({ replica, command });
+			const { replica: updatedReplica, outbox: entityOutbox } = applyCommand({ replica, command });
 			const updatedReplicas = new Map(acc.finalReplicas).set(key, updatedReplica);
 
-			/* ─── Deterministic post-effects: generate follow-up commands if needed ─── */
-			const newOutbox = (() => {
-				switch (command.type) {
-					case 'PROPOSE': {
-						if (!replica.proposal && updatedReplica.proposal) {
-							// Proposal just created: ask all signers (including proposer) to SIGN
-							const proposal = updatedReplica.proposal;
-							// Safety check: ensure proposal actually exists before accessing properties
-							if (!proposal.hash) {
-								console.error('FRAME_BUILD_ERR: Proposal created without hash');
-								return [];
-							}
-							return Object.keys(updatedReplica.last.state.quorum.members).map(s => ({
-								from: s as Address,
-								to: updatedReplica.proposer, // Send to proposer
-								cmd: {
-									type: 'SIGN' as const,
-									addrKey: command.addrKey,
-									signer: s as Address,
-									frameHash: proposal.hash,
-									sig: DUMMY_SIGNATURE,
-								},
-							}));
-						}
-						return [];
-					}
-					case 'SIGN': {
-						if (updatedReplica.isAwaitingSignatures && updatedReplica.proposal) {
-							const proposal = updatedReplica.proposal;
-							const q = updatedReplica.last.state.quorum;
-							const prevPower = replica.proposal ? calculateQuorumPower(q, replica.proposal.sigs) : 0n;
-							const newPower = calculateQuorumPower(q, proposal.sigs);
-							if (prevPower < q.threshold && newPower >= q.threshold) {
-								// Threshold just reached: proposer will broadcast COMMIT
-								// We need to send COMMIT to all replicas of this entity
-								return Object.keys(updatedReplica.last.state.quorum.members).map(signerAddr => ({
-									from: updatedReplica.proposer,
-									to: signerAddr as Address,
-									cmd: {
-										type: 'COMMIT' as const,
-										addrKey: command.addrKey,
-										hanko: DUMMY_SIGNATURE,
-										frame: {
-											height: proposal.height,
-											ts: proposal.ts,
-											txs: proposal.txs,
-											state: proposal.state,
-										},
-										signers: [], // Will be filled by runtime
-										_sigs: Object.fromEntries(proposal.sigs), // Pass sigs separately for runtime
-									},
-								}));
-							}
-						}
-						return [];
-					}
-					case 'ADD_TX': {
-						return [];
-					}
-					case 'COMMIT':
-						return [];
-					default:
-						return [];
-				}
-			})();
+			/* The entity layer now handles all consensus logic and generates necessary commands */
 
 			return {
 				finalReplicas: updatedReplicas,
-				allOutbox: [...acc.allOutbox, ...newOutbox],
+				allOutbox: [...acc.allOutbox, ...entityOutbox],
 			};
 		},
 		{ finalReplicas: new Map(prev.replicas), allOutbox: [] as Input[] },
