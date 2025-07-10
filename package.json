@@ -1,6 +1,6 @@
 {
 	"name": "xln-poc",
-	"version": "0.1.0",
+	"version": "0.0.1",
 	"description": "XLN Proof of Concept - BFT consensus chat demo",
 	"main": "src/index.ts",
 	"type": "module",
