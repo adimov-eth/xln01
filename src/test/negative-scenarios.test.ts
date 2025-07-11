@@ -95,6 +95,7 @@ describe('XLN Negative Path Tests', () => {
 				type: 'PROPOSE' as const,
 				addrKey: `${DEMO_JURISDICTION}:${DEMO_ENTITY_ID}`,
 				ts: Date.now(),
+				quorumHash: hashQuorum(replica.last.state.quorum),
 			};
 
 			const result = applyCommand({ replica, command });
@@ -120,6 +121,7 @@ describe('XLN Negative Path Tests', () => {
 				signer: '0x1111111111111111111111111111111111111111' as Address,
 				frameHash: '0x2222222222222222222222222222222222222222222222222222222222222222' as Hex, // Different hash
 				sig: DUMMY_SIGNATURE,
+				quorumHash: hashQuorum(replica.last.state.quorum),
 			};
 
 			const result = applyCommand({ replica, command });
@@ -144,6 +146,7 @@ describe('XLN Negative Path Tests', () => {
 				signer: '0x9999999999999999999999999999999999999999' as Address,
 				frameHash: '0x1111111111111111111111111111111111111111111111111111111111111111' as Hex,
 				sig: DUMMY_SIGNATURE,
+				quorumHash: hashQuorum(replica.last.state.quorum),
 			};
 
 			const result = applyCommand({ replica, command });
@@ -236,6 +239,7 @@ describe('XLN Negative Path Tests', () => {
 					type: 'PROPOSE',
 					addrKey: `${DEMO_JURISDICTION}:${DEMO_ENTITY_ID}`,
 					ts: Date.now(),
+					quorumHash: hashQuorum(replica.last.state.quorum),
 				},
 			};
 
