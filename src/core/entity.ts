@@ -1,7 +1,6 @@
-import { keccak_256 as keccak } from '@noble/hashes/sha3';
-import { canonical } from '../codec/rlp';
 import { DUMMY_SIGNATURE } from '../constants';
-import { type PubKey, verifyAggregate } from '../crypto/bls';
+import { type PubKey } from '../crypto/bls';
+import { blsVerifyAggregate } from '../infra/bls';
 import type {
 	Address,
 	Command,
@@ -17,6 +16,7 @@ import type {
 	Transaction,
 } from '../types';
 import { err, ok } from '../types';
+import { hashFrame as computeFrameHash } from './codec';
 import { ADDR_TO_PUB } from './runtime';
 
 export interface ValidateCommitParams {
@@ -53,9 +53,17 @@ export const calculateQuorumPower = (quorum: Quorum, signers: Address[] | Map<Ad
 	return addresses.reduce((sum, addr) => sum + (quorum.members[addr]?.shares ?? 0n), 0n);
 };
 
-/** Compute canonical hash of a frame's content using keccak256. */
+/** Compute canonical hash of a frame's content using RLP encoding and keccak256. */
 export const hashFrame = <T>(frame: Frame<T>): Hex => {
-	return `0x${Buffer.from(keccak(canonical(frame))).toString('hex')}`;
+	// For now, we'll use a simplified header that works with current Frame structure
+	// In the future, we should add parentHash and proposer to Frame type
+	const header = {
+		height: frame.height,
+		timestamp: frame.ts,
+		parentHash: '0x0000000000000000000000000000000000000000000000000000000000000000' as Hex,
+		proposer: '0x0000000000000000000000000000000000000000' as Hex,
+	};
+	return computeFrameHash(header, frame.txs);
 };
 
 const sortTransaction = (a: Transaction, b: Transaction): number =>
@@ -94,16 +102,13 @@ const checkSignatures: Validator<ValidateCommitParams> = params => {
 		return err('Missing public keys for some signers');
 	}
 
-	try {
-		const isValid = verifyAggregate({
-			hanko: params.hanko,
-			messageHash: hashFrame(params.frame),
-			publicKeys: pubKeys,
-		});
-		return isValid ? ok(params) : err('Invalid aggregate signature');
-	} catch (e) {
-		return err(`BLS verification error: ${String(e)}`);
-	}
+	const verifyResult = blsVerifyAggregate({
+		sig: params.hanko,
+		msgHash: hashFrame(params.frame),
+		pubKeys,
+	});
+
+	return verifyResult.ok ? ok(params) : err(verifyResult.error.message);
 };
 
 const compose =
