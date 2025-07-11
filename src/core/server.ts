@@ -51,6 +51,7 @@ export function applyServerBlock({ prev, batch, timestamp }: ApplyServerBlockPar
 			const key = command.type === 'IMPORT' ? '' : command.addrKey + (signerPart ? ':' + signerPart : '');
 
 			/* ─── IMPORT command (bootstrap a new Entity into server state) ─── */
+			// TODO: doublecheck case for distributed Network
 			if (command.type === 'IMPORT') {
 				const baseReplica = command.replica;
 				const eKey = getAddrKey(baseReplica.address);

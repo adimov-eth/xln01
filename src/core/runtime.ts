@@ -43,6 +43,7 @@ export interface Runtime {
 export const createRuntime = (): Runtime => {
 	const initialReplicas = new Map<string, Replica>();
 
+	// TODO: there is no need in "current". "lastHash" can be replaced with timestamp
 	const stateRef = {
 		current: {
 			replicas: initialReplicas,

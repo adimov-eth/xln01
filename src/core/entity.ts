@@ -309,6 +309,7 @@ const commandHandlers: Record<Command['type'], CommandHandler> = {
 };
 
 /** Apply a high-level command to a replica's state. Returns a new Replica state and outbox (no mutation). */
+// TODO: rename to applyEntityInput or similar for clarity
 export const applyCommand = ({ replica, command }: ApplyCommandParams): ApplyCommandResult => {
 	const handler = commandHandlers[command.type];
 	return handler ? handler(replica, command) : { replica, outbox: [] };
