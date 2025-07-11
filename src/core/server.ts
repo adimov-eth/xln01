@@ -4,6 +4,7 @@ import { DUMMY_SIGNATURE, EMPTY_HASH } from '../constants';
 import type { Address, Hex, Input, Replica, ServerFrame, ServerState, TS } from '../types';
 import { getAddrKey } from '../types';
 import { applyCommand } from './entity';
+import { hashQuorum } from './codec';
 
 export interface ApplyServerBlockParams {
 	prev: ServerState;
@@ -113,6 +114,7 @@ export function applyServerBlock({ prev, batch, timestamp }: ApplyServerBlockPar
 								type: 'PROPOSE' as const,
 								addrKey: entityKey,
 								ts: timestamp,
+								quorumHash: hashQuorum(replica.last.state.quorum),
 							},
 						},
 					],

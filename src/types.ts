@@ -65,9 +65,9 @@ export interface Replica {
 export type Command =
 	| { type: 'IMPORT'; replica: Replica }
 	| { type: 'ADD_TX'; addrKey: string; tx: Transaction }
-	| { type: 'PROPOSE'; addrKey: string; ts: TS }
-	| { type: 'SIGN'; addrKey: string; signer: Address; frameHash: Hex; sig: Hex }
-	| { type: 'COMMIT'; addrKey: string; hanko: Hanko; frame: Frame<EntityState>; signers: Address[] };
+	| { type: 'PROPOSE'; addrKey: string; ts: TS; quorumHash: Hex }
+	| { type: 'SIGN'; addrKey: string; signer: Address; frameHash: Hex; sig: Hex; quorumHash: Hex }
+	| { type: 'COMMIT'; addrKey: string; hanko: Hanko; frame: Frame<EntityState>; signers: Address[]; quorumHash: Hex };
 
 export interface Input {
 	from: Address;

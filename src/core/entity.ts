@@ -16,7 +16,7 @@ import type {
 	Transaction,
 } from '../types';
 import { err, ok } from '../types';
-import { hashFrame as computeFrameHash } from './codec';
+import { hashFrame as computeFrameHash, hashQuorum } from './codec';
 import { ADDR_TO_PUB } from './runtime';
 
 export interface ValidateCommitParams {
@@ -51,6 +51,12 @@ export interface ApplyCommandResult {
 export const calculateQuorumPower = (quorum: Quorum, signers: Address[] | Map<Address, Hex>): bigint => {
 	const addresses = Array.isArray(signers) ? signers : [...signers.keys()];
 	return addresses.reduce((sum, addr) => sum + (quorum.members[addr]?.shares ?? 0n), 0n);
+};
+
+/** Validate that the quorumHash matches the current quorum */
+export const validateQuorumHash = (quorum: Quorum, quorumHash: Hex): Result<true, string> => {
+	const expectedHash = hashQuorum(quorum);
+	return quorumHash === expectedHash ? ok(true) : err(`Quorum hash mismatch: ${quorumHash} != ${expectedHash}`);
 };
 
 /** Compute canonical hash of a frame's content using RLP encoding and keccak256. */
@@ -177,6 +183,13 @@ const handleAddTx: CommandHandler = (replica, command) => {
 const handlePropose: CommandHandler = (replica, command) => {
 	if (command.type !== 'PROPOSE') return { replica, outbox: [] };
 
+	// Validate quorumHash
+	const quorumHashResult = validateQuorumHash(replica.last.state.quorum, command.quorumHash);
+	if (!quorumHashResult.ok) {
+		console.log(`PROPOSE failed: ${quorumHashResult.error}`);
+		return { replica, outbox: [] };
+	}
+
 	if (replica.isAwaitingSignatures || replica.mempool.length === 0) {
 		return { replica, outbox: [] };
 	}
@@ -213,6 +226,7 @@ const handlePropose: CommandHandler = (replica, command) => {
 	};
 
 	// Generate SIGN requests for all quorum members
+	const quorumHash = hashQuorum(quorum);
 	const outbox: Input[] = Object.keys(quorum.members).map(s => ({
 		from: s as Address,
 		to: replica.proposer,
@@ -222,6 +236,7 @@ const handlePropose: CommandHandler = (replica, command) => {
 			signer: s as Address,
 			frameHash: proposal.hash,
 			sig: DUMMY_SIGNATURE,
+			quorumHash,
 		},
 	}));
 
@@ -230,6 +245,13 @@ const handlePropose: CommandHandler = (replica, command) => {
 
 const handleSign: CommandHandler = (replica, command) => {
 	if (command.type !== 'SIGN') return { replica, outbox: [] };
+
+	// Validate quorumHash
+	const quorumHashResult = validateQuorumHash(replica.last.state.quorum, command.quorumHash);
+	if (!quorumHashResult.ok) {
+		console.log(`SIGN failed: ${quorumHashResult.error}`);
+		return { replica, outbox: [] };
+	}
 
 	const { proposal, isAwaitingSignatures, last } = replica;
 	if (!isAwaitingSignatures || !proposal) return { replica, outbox: [] };
@@ -256,6 +278,7 @@ const handleSign: CommandHandler = (replica, command) => {
 
 	if (prevPower < quorum.threshold && newPower >= quorum.threshold) {
 		// Threshold reached: generate COMMIT commands for all replicas
+		const quorumHash = hashQuorum(quorum);
 		const outbox: Input[] = Object.keys(quorum.members).map(signerAddr => ({
 			from: replica.proposer,
 			to: signerAddr as Address,
@@ -270,6 +293,7 @@ const handleSign: CommandHandler = (replica, command) => {
 					state: updatedProposal.state,
 				},
 				signers: [],
+				quorumHash,
 				_sigs: Object.fromEntries(updatedProposal.sigs),
 			},
 		}));
@@ -281,6 +305,13 @@ const handleSign: CommandHandler = (replica, command) => {
 
 const handleCommit: CommandHandler = (replica, command) => {
 	if (command.type !== 'COMMIT') return { replica, outbox: [] };
+
+	// Validate quorumHash
+	const quorumHashResult = validateQuorumHash(replica.last.state.quorum, command.quorumHash);
+	if (!quorumHashResult.ok) {
+		console.log(`COMMIT failed: ${quorumHashResult.error}`);
+		return { replica, outbox: [] };
+	}
 
 	const isValid = validateCommit({
 		frame: command.frame,

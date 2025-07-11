@@ -45,7 +45,7 @@ export const encodeQuorum = (quorum: Quorum): Uint8Array => {
 		convertBigIntToBuffer(BigInt(quorum.threshold)),
 		sortedEntries.map(([addr, member]) => [
 			hexToBuf(addr as Hex),
-			hexToBuf(member.pubKey as Hex),
+			convertBigIntToBuffer(member.nonce),
 			convertBigIntToBuffer(member.shares),
 		]),
 	]);

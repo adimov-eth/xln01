@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'bun:test';
 import { keccak_256 as keccak } from '@noble/hashes/sha3';
-import { hashFrame } from '../core/codec';
+import { hashFrame, hashQuorum } from '../core/codec';
+import { validateQuorumHash } from '../core/entity';
 import { aggregate, getPublicKey, randomPriv, sign } from '../crypto/bls';
 import { blsVerifyAggregate } from '../infra/bls';
-import type { Frame, Hex, Transaction, EntityState } from '../types';
+import type { Frame, Hex, Transaction, EntityState, Quorum } from '../types';
 
 describe('Integration Tests', () => {
 	describe('RLP Frame Hashing', () => {
@@ -248,9 +249,70 @@ describe('Integration Tests', () => {
 	});
 
 	describe('QuorumProof Validation', () => {
-		it.todo('should reject command with invalid quorum hash');
-		it.todo('should accept command with matching quorum hash');
-		it.todo('should compute quorum hash deterministically');
+		it('should reject command with invalid quorum hash', () => {
+			// Create a mock quorum
+			const quorum: Quorum = {
+				threshold: 2n,
+				members: {
+					'0x1111111111111111111111111111111111111111': { nonce: 0n, shares: 1n },
+					'0x2222222222222222222222222222222222222222': { nonce: 0n, shares: 1n },
+					'0x3333333333333333333333333333333333333333': { nonce: 0n, shares: 1n },
+				},
+			};
+
+			// Use wrong hash
+			const wrongHash = ('0x' + '00'.repeat(32)) as Hex;
+
+			// Validate wrong hash fails
+			const result = validateQuorumHash(quorum, wrongHash);
+			expect(result.ok).toBe(false);
+			if (!result.ok) {
+				expect(result.error).toContain('Quorum hash mismatch');
+			}
+		});
+
+		it('should accept command with matching quorum hash', () => {
+			// Create a mock quorum
+			const quorum: Quorum = {
+				threshold: 2n,
+				members: {
+					'0x1111111111111111111111111111111111111111': { nonce: 0n, shares: 1n },
+					'0x2222222222222222222222222222222222222222': { nonce: 0n, shares: 1n },
+					'0x3333333333333333333333333333333333333333': { nonce: 0n, shares: 1n },
+				},
+			};
+
+			// Compute correct hash
+			const correctHash = hashQuorum(quorum);
+
+			// Validate correct hash passes
+			const result = validateQuorumHash(quorum, correctHash);
+			expect(result.ok).toBe(true);
+		});
+
+		it('should compute quorum hash deterministically', () => {
+			// Create a mock quorum
+			const quorum: Quorum = {
+				threshold: 3n,
+				members: {
+					'0x3333333333333333333333333333333333333333': { nonce: 2n, shares: 2n },
+					'0x1111111111111111111111111111111111111111': { nonce: 0n, shares: 1n },
+					'0x2222222222222222222222222222222222222222': { nonce: 1n, shares: 1n },
+				},
+			};
+
+			// Compute hash multiple times
+			const hash1 = hashQuorum(quorum);
+			const hash2 = hashQuorum(quorum);
+			const hash3 = hashQuorum(quorum);
+
+			// All should be identical
+			expect(hash1).toBe(hash2);
+			expect(hash2).toBe(hash3);
+
+			// Should be a valid hex hash
+			expect(hash1).toMatch(/^0x[0-9a-f]{64}$/);
+		});
 	});
 
 	describe('WAL Replay', () => {

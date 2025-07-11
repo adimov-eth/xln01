@@ -1,4 +1,5 @@
 import { describe, expect, it } from '@jest/globals';
+import { hashQuorum } from '../core/codec';
 import { DEMO_ENTITY_ID, DEMO_JURISDICTION, DUMMY_SIGNATURE, EMPTY_HASH, INITIAL_HEIGHT } from '../constants';
 import { applyCommand, applyTx, execFrame } from '../core/entity';
 import { applyServerBlock } from '../core/server';
@@ -283,6 +284,7 @@ describe('XLN Negative Path Tests', () => {
 				type: 'PROPOSE' as const,
 				addrKey: `${DEMO_JURISDICTION}:${DEMO_ENTITY_ID}`,
 				ts: Date.now(),
+				quorumHash: hashQuorum(state.quorum),
 			};
 
 			const result = applyCommand({ replica, command });
@@ -310,6 +312,7 @@ describe('XLN Negative Path Tests', () => {
 				signer: '0x1111111111111111111111111111111111111111' as Address, // Already signed
 				frameHash: '0x1111111111111111111111111111111111111111111111111111111111111111' as Hex,
 				sig: '0x3333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333' as Hex,
+				quorumHash: hashQuorum(replica.last.state.quorum),
 			};
 
 			const result = applyCommand({ replica, command });
@@ -328,6 +331,7 @@ describe('XLN Negative Path Tests', () => {
 				frame: createFrame(createEntityState(), 5n), // Wrong height (should be 1)
 				hanko: DUMMY_SIGNATURE,
 				signers: ['0x1111111111111111111111111111111111111111' as Address],
+				quorumHash: hashQuorum(replica.last.state.quorum),
 			};
 
 			const result = applyCommand({ replica, command });
