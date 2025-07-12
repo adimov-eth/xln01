@@ -71,7 +71,7 @@ export const hashFrame = <T>(frame: Frame<T>): Hex => {
 	// Legacy format - use defaults for missing fields
 	const header = {
 		height: frame.height,
-		timestamp: frame.ts,
+		timestamp: BigInt(frame.ts), // Convert number to bigint
 		parentHash: '0x0000000000000000000000000000000000000000000000000000000000000000' as Hex,
 		proposer: '0x0000000000000000000000000000000000000000' as Hex,
 	};

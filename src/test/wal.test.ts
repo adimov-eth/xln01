@@ -4,7 +4,7 @@ import { createSnapshot } from '../infra/snapshot';
 import { replayFromWAL, validateWALConsistency } from '../infra/replay';
 import { createRuntime } from '../core/runtime';
 import { DEMO_ENTITY_ID, DEMO_JURISDICTION, DUMMY_SIGNATURE, EMPTY_HASH } from '../constants';
-import type { Input, EntityState, Replica, Address } from '../types';
+import type { Input, EntityState, Replica, Address, ServerFrame, ServerState, Hex } from '../types';
 
 describe('WAL Tests', () => {
 	const getTestDirs = () => {
@@ -183,12 +183,12 @@ describe('WAL Tests', () => {
 				};
 
 				const prevHash = i === 1 ? EMPTY_HASH : `0x${i.toString().repeat(64)}`;
-				const frame = {
+				const frame: ServerFrame = {
 					height: BigInt(i),
 					ts: i * 1000,
 					inputs: [input],
 					root: `0x${(i + 10).toString().repeat(64).slice(0, 64)}`,
-					parent: prevHash,
+					parent: prevHash as Hex,
 					hash: `0x${(i + 1).toString().repeat(64).slice(0, 64)}`,
 				};
 
@@ -403,7 +403,7 @@ describe('WAL Tests', () => {
 			// Save snapshots for heights 1-12
 			// eslint-disable-next-line functional/no-loop-statements, fp/no-loops, functional/no-let, fp/no-let, fp/no-mutation
 			for (let i = 1n; i <= 12n; i++) {
-				const serverState = {
+				const serverState: ServerState = {
 					replicas: new Map(),
 					height: i,
 					lastHash: `0x${i.toString().repeat(64).slice(0, 64)}`,

@@ -40,7 +40,7 @@ describe('Integration Tests', () => {
 			const hash = hashFrame(
 				{
 					height: frame.height,
-					timestamp: frame.ts,
+					timestamp: BigInt(frame.ts),
 					parentHash: '0x0000000000000000000000000000000000000000000000000000000000000000' as Hex,
 					proposer: '0x0000000000000000000000000000000000000000' as Hex,
 				},
@@ -54,7 +54,7 @@ describe('Integration Tests', () => {
 			const hash2 = hashFrame(
 				{
 					height: frame.height,
-					timestamp: frame.ts,
+					timestamp: BigInt(frame.ts),
 					parentHash: '0x0000000000000000000000000000000000000000000000000000000000000000' as Hex,
 					proposer: '0x0000000000000000000000000000000000000000' as Hex,
 				},
@@ -76,7 +76,7 @@ describe('Integration Tests', () => {
 			const hash = hashFrame(
 				{
 					height: frame.height,
-					timestamp: frame.ts,
+					timestamp: BigInt(frame.ts),
 					parentHash: '0x0000000000000000000000000000000000000000000000000000000000000000' as Hex,
 					proposer: '0x0000000000000000000000000000000000000000' as Hex,
 				},
@@ -97,7 +97,7 @@ describe('Integration Tests', () => {
 			const hash = hashFrame(
 				{
 					height: frame.height,
-					timestamp: frame.ts,
+					timestamp: BigInt(frame.ts),
 					parentHash: '0x0000000000000000000000000000000000000000000000000000000000000000' as Hex,
 					proposer: '0x0000000000000000000000000000000000000000' as Hex,
 				},
@@ -125,7 +125,7 @@ describe('Integration Tests', () => {
 			const hash1 = hashFrame(
 				{
 					height: frame1.height,
-					timestamp: frame1.ts,
+					timestamp: BigInt(frame1.ts),
 					parentHash: '0x0000000000000000000000000000000000000000000000000000000000000000' as Hex,
 					proposer: '0x0000000000000000000000000000000000000000' as Hex,
 				},
@@ -135,7 +135,7 @@ describe('Integration Tests', () => {
 			const hash2 = hashFrame(
 				{
 					height: frame2.height,
-					timestamp: frame2.ts,
+					timestamp: BigInt(frame2.ts),
 					parentHash: '0x0000000000000000000000000000000000000000000000000000000000000000' as Hex,
 					proposer: '0x0000000000000000000000000000000000000000' as Hex,
 				},
@@ -626,8 +626,11 @@ describe('Integration Tests', () => {
 			// Should generate PROPOSE commands for both entities
 			const proposeCommands = result.outbox.filter(o => o.cmd.type === 'PROPOSE');
 			expect(proposeCommands.length).toBe(2);
-			// eslint-disable-next-line fp/no-mutating-methods, @typescript-eslint/no-unsafe-return
-			expect(proposeCommands.map(p => p.cmd.addrKey).sort()).toEqual(['test:entity1', 'test:entity2']);
+			// eslint-disable-next-line fp/no-mutating-methods
+			expect(proposeCommands.map(p => (p.cmd.type === 'PROPOSE' ? p.cmd.addrKey : '')).sort()).toEqual([
+				'test:entity1',
+				'test:entity2',
+			]);
 		});
 
 		it('should broadcast commits to all replicas', () => {

@@ -36,6 +36,7 @@ test('validateCommit should deduplicate signers', () => {
 		hanko: '0xdummy',
 		prev: prevFrame,
 		signers: [signer1, signer1, signer2], // signer1 is duplicated
+		proposer: '0x1111111111111111111111111111111111111111' as Address,
 	};
 
 	// This test would pass if deduplication is working
