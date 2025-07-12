@@ -329,10 +329,130 @@ describe('Integration Tests', () => {
 	});
 
 	describe('WAL Replay', () => {
-		it.todo('should write inputs to WAL');
-		it.todo('should write ServerFrames to WAL');
-		it.todo('should replay from WAL and reach same state');
-		it.todo('should handle crash recovery mid-tick');
+		it('should write inputs and ServerFrames to WAL', async () => {
+			const { createWAL } = await import('../infra/wal');
+			const { createRuntime } = await import('../core/runtime');
+
+			const walDir = `/tmp/xln-test-integration-wal-${Date.now()}`;
+			const wal = await createWAL({ directory: walDir });
+
+			// Create runtime with WAL
+			const runtime = createRuntime({ wal });
+
+			// Process a transaction
+			const input: Input = {
+				from: '0x0000000000000000000000000000000000000000' as Address,
+				to: runtime.ADDRS[0] as Address,
+				cmd: {
+					type: 'ADD_TX',
+					addrKey: 'test:entity',
+					tx: {
+						kind: 'chat',
+						nonce: 0n,
+						from: runtime.ADDRS[0] as Address,
+						body: { message: 'WAL test' },
+						sig: DUMMY_SIGNATURE,
+					},
+				},
+			};
+
+			// Use async tick to ensure WAL writes
+			const result = await runtime.tickAsync({ now: 1000, incoming: [input] });
+			expect(result.frame.height).toBe(1n);
+
+			// Read back from WAL
+			const { inputs, frames } = await wal.replay();
+			expect(inputs.length).toBe(1);
+			expect(frames.length).toBe(1);
+			expect(inputs[0]).toEqual([input]);
+			expect(frames[0].height).toBe(1n);
+
+			await wal.close();
+			await import('fs/promises').then(fs => fs.rm(walDir, { recursive: true, force: true }));
+		});
+
+		it('should replay from WAL and reach same state', async () => {
+			const { createWAL } = await import('../infra/wal');
+			const { createSnapshot } = await import('../infra/snapshot');
+			const { replayFromWAL } = await import('../infra/replay');
+			const { createRuntime } = await import('../core/runtime');
+
+			const walDir = `/tmp/xln-test-integration-wal-replay-${Date.now()}`;
+			const snapshotDir = `/tmp/xln-test-integration-snapshot-${Date.now()}`;
+
+			const wal = await createWAL({ directory: walDir });
+			const snapshot = await createSnapshot({ directory: snapshotDir });
+
+			// Create entity
+			const entityState: EntityState = {
+				quorum: {
+					threshold: 2n,
+					members: {
+						'0x1111111111111111111111111111111111111111': { nonce: 0n, shares: 1n },
+						'0x2222222222222222222222222222222222222222': { nonce: 0n, shares: 1n },
+						'0x3333333333333333333333333333333333333333': { nonce: 0n, shares: 1n },
+					},
+				},
+				chat: [],
+			};
+
+			const replica: Replica = {
+				address: { jurisdiction: 'test', entityId: 'entity' },
+				proposer: '0x1111111111111111111111111111111111111111' as Address,
+				isAwaitingSignatures: false,
+				mempool: [],
+				last: { height: 0n, ts: 0, txs: [], state: entityState },
+			};
+
+			const runtime = createRuntime({
+				wal,
+				initialState: {
+					replicas: new Map([['test:entity:0x1111111111111111111111111111111111111111', replica]]),
+					height: 0n,
+					lastHash: EMPTY_HASH,
+				},
+			});
+
+			// Process multiple transactions
+			// eslint-disable-next-line functional/no-loop-statements, fp/no-loops, functional/no-let, fp/no-let, fp/no-mutation
+			for (let i = 0; i < 3; i++) {
+				const input: Input = {
+					from: '0x0000000000000000000000000000000000000000' as Address,
+					to: '0x1111111111111111111111111111111111111111' as Address,
+					cmd: {
+						type: 'ADD_TX',
+						addrKey: 'test:entity',
+						tx: {
+							kind: 'chat',
+							nonce: BigInt(i),
+							from: '0x1111111111111111111111111111111111111111' as Address,
+							body: { message: `Message ${i}` },
+							sig: DUMMY_SIGNATURE,
+						},
+					},
+				};
+
+				await runtime.tickAsync({ now: 1000 + i * 100, incoming: [input] });
+			}
+
+			// Close WAL and replay
+			await wal.close();
+
+			const wal2 = await createWAL({ directory: walDir });
+			const replayResult = await replayFromWAL({
+				wal: wal2,
+				snapshot,
+				validateFrames: false,
+			});
+
+			expect(replayResult.replayedFrames).toBe(3);
+			expect(replayResult.endHeight).toBe(3n);
+			expect(replayResult.state.height).toBe(3n);
+
+			await wal2.close();
+			await import('fs/promises').then(fs => fs.rm(walDir, { recursive: true, force: true }));
+			await import('fs/promises').then(fs => fs.rm(snapshotDir, { recursive: true, force: true }));
+		});
 	});
 
 	describe('Multi-Entity ServerFrame', () => {
