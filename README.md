@@ -29,9 +29,19 @@ Think of it as a **high-speed rail system** where:
 - Tickets (signatures) prove consensus among conductors
 - The destination ledger (blockchain) only records arrivals
 
+### Version 0.6 XLN Specification Compliance
+
+This version brings the implementation into alignment with the XLN v1.4.1-RC2 specification:
+
+- **Frame Structure Compliance**: Frames now include proper header/body structure with parentHash and proposer fields
+- **BigInt Timestamps**: FrameHeader uses bigint timestamps as required by the spec
+- **Transaction Sorting**: Implements spec-compliant sorting (nonce → signerId → kind)
+- **Backward Compatibility**: Maintains support for legacy frame format during migration
+- **84%+ Test Coverage**: Added comprehensive tests for spec compliance
+
 ### Version 0.5 Production Features
 
-This implementation adds critical production-grade capabilities from xlnfinance/xln:
+Previous implementation added critical production-grade capabilities from xlnfinance/xln:
 
 - **BLS Aggregate Signatures**: Real cryptographic verification using BLS12-381 signatures
 - **RLP Encoding**: Ethereum-compatible recursive length prefix encoding for deterministic serialization
@@ -40,7 +50,6 @@ This implementation adds critical production-grade capabilities from xlnfinance/
 - **Leader Rotation**: Deterministic proposer selection with timeout-based re-proposal
 - **QuorumHash Validation**: Prevents replay attacks across different quorum configurations
 - **Multi-Entity ServerFrames**: Global merkle root computation across all entities
-- **91%+ Test Coverage**: Comprehensive testing including fuzz tests and Byzantine scenarios
 
 ### Version 0.4 Improvements
 
