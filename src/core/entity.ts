@@ -216,6 +216,7 @@ const handlePropose: CommandHandler = (replica, command) => {
 			needsProposerSig && replica.proposer
 				? new Map<Address, Hex>([[replica.proposer, DUMMY_SIGNATURE]])
 				: new Map<Address, Hex>(),
+		proposalTs: command.ts,
 	};
 
 	const updatedReplica = {

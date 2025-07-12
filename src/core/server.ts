@@ -1,10 +1,11 @@
 import { keccak_256 as keccak } from '@noble/hashes/sha3';
 import { encodeServerFrame } from '../codec/rlp';
 import { DUMMY_SIGNATURE, EMPTY_HASH } from '../constants';
-import type { Address, Hex, Input, Replica, ServerFrame, ServerState, TS } from '../types';
+import type { Address, Hex, Input, Replica, ServerFrame, ServerState, TS, Quorum } from '../types';
 import { getAddrKey } from '../types';
 import { applyCommand } from './entity';
 import { hashQuorum, computeStateRoot } from './codec';
+import { proposerFor, hasProposalTimedOut } from './proposer';
 
 export interface ApplyServerBlockParams {
 	prev: ServerState;
@@ -101,47 +102,61 @@ export function applyServerBlock({ prev, batch, timestamp }: ApplyServerBlockPar
 	);
 
 	/* ─── Generate PROPOSE commands for entities with pending transactions ─── */
-	const proposeEntries = Array.from(finalReplicas.entries()).reduce<Array<[string, Input]>>(
-		(entries, [key, replica]) => {
-			const entityKey = replica.address.jurisdiction + ':' + replica.address.entityId;
+	// Group replicas by entity
+	const entitiesByKey = [...finalReplicas.entries()].reduce((acc, [key, replica]) => {
+		const entityKey = getAddrKey(replica.address);
+		const existing = acc.get(entityKey) ?? {
+			replicas: new Map(),
+			quorum: replica.last.state.quorum,
+		};
+		return new Map(acc).set(entityKey, {
+			...existing,
+			replicas: new Map(existing.replicas).set(key, replica) as Map<string, Replica>,
+		});
+	}, new Map<string, { replicas: Map<string, Replica>; quorum: Quorum }>());
 
-			// Only process each entity once, and only if it's the proposer's replica
-			if (key.endsWith(':' + replica.proposer) && !replica.isAwaitingSignatures && replica.mempool.length > 0) {
+	// Generate PROPOSE commands for eligible entities
+	const proposeCommands = [...entitiesByKey.entries()].reduce<Input[]>(
+		(commands, [entityKey, { replicas, quorum }]) => {
+			// Get quorum members
+			const members = Object.keys(quorum.members) as Address[];
+			if (members.length === 0) return commands;
+
+			// Determine current proposer based on height
+			const currentProposer = proposerFor(prev.height + 1n, members);
+
+			// Find the replica for current proposer
+			const proposerReplica = [...replicas.values()].find(r => r.proposer === currentProposer);
+			if (!proposerReplica) return commands;
+
+			// Check if entity should propose
+			const shouldPropose = !proposerReplica.isAwaitingSignatures && proposerReplica.mempool.length > 0;
+
+			// Check if there's an existing proposal that has timed out
+			const hasTimedOut =
+				proposerReplica.proposal && proposerReplica.proposal.proposalTs
+					? hasProposalTimedOut(proposerReplica.proposal.proposalTs, timestamp, prev.height + 1n)
+					: false;
+
+			if (shouldPropose || hasTimedOut) {
 				return [
-					...entries,
-					[
-						entityKey,
-						{
-							from: replica.proposer,
-							to: replica.proposer,
-							cmd: {
-								type: 'PROPOSE' as const,
-								addrKey: entityKey,
-								ts: timestamp,
-								quorumHash: hashQuorum(replica.last.state.quorum),
-							},
+					...commands,
+					{
+						from: currentProposer,
+						to: currentProposer,
+						cmd: {
+							type: 'PROPOSE' as const,
+							addrKey: entityKey,
+							ts: timestamp,
+							quorumHash: hashQuorum(quorum),
 						},
-					],
+					},
 				];
 			}
-			return entries;
+			return commands;
 		},
 		[],
 	);
-
-	// Filter to unique entities and extract commands
-	const proposeCommands = proposeEntries.reduce<{ seen: string[]; commands: Input[] }>(
-		(acc, [entityKey, input]) => {
-			if (acc.seen.includes(entityKey)) {
-				return acc;
-			}
-			return {
-				seen: [...acc.seen, entityKey],
-				commands: [...acc.commands, input],
-			};
-		},
-		{ seen: [], commands: [] },
-	).commands;
 
 	const finalOutbox = [...allOutbox, ...proposeCommands];
 

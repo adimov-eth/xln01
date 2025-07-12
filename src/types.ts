@@ -43,6 +43,7 @@ export interface Frame<T = unknown> {
 export interface ProposedFrame<T = unknown> extends Frame<T> {
 	sigs: Map<Address, Hex>;
 	hash: Hex;
+	proposalTs?: TS; // When this proposal was created (for timeout tracking)
 }
 export type Hanko = Hex;
 

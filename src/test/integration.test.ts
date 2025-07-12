@@ -756,8 +756,115 @@ describe('Integration Tests', () => {
 	});
 
 	describe('Leader Rotation', () => {
-		it.todo('should select proposer deterministically by height');
-		it.todo('should timeout and rotate to next proposer');
-		it.todo('should allow re-proposal of same transactions');
+		it('should select proposer deterministically by height', async () => {
+			const { proposerFor } = await import('../core/proposer');
+
+			// Create entity with multiple signers
+			const quorum = {
+				threshold: 2n,
+				members: {
+					'0x1111111111111111111111111111111111111111': { nonce: 0n, shares: 1n },
+					'0x2222222222222222222222222222222222222222': { nonce: 0n, shares: 1n },
+					'0x3333333333333333333333333333333333333333': { nonce: 0n, shares: 1n },
+				},
+			};
+
+			const members = Object.keys(quorum.members) as Address[];
+
+			// Verify proposer rotation
+			expect(proposerFor(0n, members)).toBe('0x1111111111111111111111111111111111111111');
+			expect(proposerFor(1n, members)).toBe('0x2222222222222222222222222222222222222222');
+			expect(proposerFor(2n, members)).toBe('0x3333333333333333333333333333333333333333');
+			expect(proposerFor(3n, members)).toBe('0x1111111111111111111111111111111111111111'); // Wraps around
+		});
+
+		it('should allow re-proposal after timeout', async () => {
+			const { hasProposalTimedOut } = await import('../core/proposer');
+
+			// Create a proposed frame with timestamp
+			const proposalTs = 1000;
+			const currentTs = 6500; // 5.5 seconds later
+
+			// Should timeout after 5 seconds at height 0
+			expect(hasProposalTimedOut(proposalTs, currentTs, 0n)).toBe(true);
+
+			// At higher heights, timeout increases
+			expect(hasProposalTimedOut(proposalTs, currentTs, 1000n)).toBe(false); // 7.5s timeout
+		});
+
+		it('should handle proposer rotation in server', () => {
+			// Setup initial state with multiple replicas
+			const entityState: EntityState = {
+				quorum: {
+					threshold: 2n,
+					members: {
+						'0x1111111111111111111111111111111111111111': { nonce: 0n, shares: 1n },
+						'0x2222222222222222222222222222222222222222': { nonce: 0n, shares: 1n },
+						'0x3333333333333333333333333333333333333333': { nonce: 0n, shares: 1n },
+					},
+				},
+				chat: [],
+			};
+
+			// Create replicas for each signer
+			const tx: Transaction = {
+				kind: 'chat',
+				nonce: 0n,
+				from: '0x1111111111111111111111111111111111111111' as Address,
+				body: { message: 'Test rotation' },
+				sig: DUMMY_SIGNATURE,
+			};
+
+			const replicas = Object.keys(entityState.quorum.members).reduce((acc, signer) => {
+				const replica: Replica = {
+					address: { jurisdiction: 'test', entityId: 'entity' },
+					proposer: signer as Address,
+					isAwaitingSignatures: false,
+					mempool: [tx], // Add transaction to ALL replicas' mempools (simulating broadcast)
+					last: { height: 0n, ts: 0, txs: [], state: entityState },
+				};
+				return new Map(acc).set(`test:entity:${signer}`, replica);
+			}, new Map<string, Replica>());
+
+			const serverState: ServerState = {
+				height: 0n,
+				replicas,
+				lastHash: EMPTY_HASH,
+			};
+
+			// Apply server block at height 0 -> creates height 1
+			// At height 1, second signer (0x2222...) should be proposer
+			const result1 = applyServerBlock({
+				prev: serverState,
+				batch: [],
+				timestamp: 1000,
+			});
+
+			const proposeCommands1 = result1.outbox.filter(o => o.cmd.type === 'PROPOSE');
+			expect(proposeCommands1.length).toBe(1);
+			expect(proposeCommands1[0].from).toBe('0x2222222222222222222222222222222222222222');
+
+			// At height 2, proposer should rotate to third signer
+			const result2 = applyServerBlock({
+				prev: result1.state,
+				batch: [],
+				timestamp: 2000,
+			});
+
+			const proposeCommands2 = result2.outbox.filter(o => o.cmd.type === 'PROPOSE');
+			expect(proposeCommands2.length).toBe(1);
+			expect(proposeCommands2[0].from).toBe('0x3333333333333333333333333333333333333333');
+
+			// At height 3, proposer should wrap back to first signer
+			const result3 = applyServerBlock({
+				prev: result2.state,
+				batch: [],
+				timestamp: 3000,
+			});
+
+			const proposeCommands3 = result3.outbox.filter(o => o.cmd.type === 'PROPOSE');
+			expect(proposeCommands3.length).toBe(1);
+			expect(proposeCommands3[0].from).toBe('0x1111111111111111111111111111111111111111');
+		});
 	});
 });
