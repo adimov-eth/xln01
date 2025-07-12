@@ -182,7 +182,7 @@ describe('WAL Tests', () => {
 					},
 				};
 
-				const prevHash = i === 1 ? EMPTY_HASH : (`0x${i.toString().repeat(64)}`);
+				const prevHash = i === 1 ? EMPTY_HASH : `0x${i.toString().repeat(64)}`;
 				const frame = {
 					height: BigInt(i),
 					ts: i * 1000,

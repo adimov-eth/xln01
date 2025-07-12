@@ -29,9 +29,22 @@ Think of it as a **high-speed rail system** where:
 - Tickets (signatures) prove consensus among conductors
 - The destination ledger (blockchain) only records arrivals
 
+### Version 0.5 Production Features
+
+This implementation adds critical production-grade capabilities from xlnfinance/xln:
+
+- **BLS Aggregate Signatures**: Real cryptographic verification using BLS12-381 signatures
+- **RLP Encoding**: Ethereum-compatible recursive length prefix encoding for deterministic serialization
+- **Write-Ahead Log (WAL)**: LevelDB-based persistence for crash recovery and audit trails
+- **Snapshot System**: Periodic state snapshots with compaction for fast sync
+- **Leader Rotation**: Deterministic proposer selection with timeout-based re-proposal
+- **QuorumHash Validation**: Prevents replay attacks across different quorum configurations
+- **Multi-Entity ServerFrames**: Global merkle root computation across all entities
+- **91%+ Test Coverage**: Comprehensive testing including fuzz tests and Byzantine scenarios
+
 ### Version 0.4 Improvements
 
-This implementation includes critical fixes for production readiness:
+Previous improvements for production readiness:
 
 - **Parent Hash Linking**: Added blockchain-style parent hash linking for replay protection
 - **Mempool Deduplication**: Prevents duplicate transactions based on signature uniqueness
@@ -246,10 +259,19 @@ interface Quorum {
 
 ### Cryptographic Primitives
 
-- **Signatures**: BLS12-381 for aggregation capability
+- **Signatures**: BLS12-381 for aggregation capability (via @noble/curves)
 - **Hashing**: Keccak-256 (Ethereum compatible)
-- **Encoding**: RLP for canonical serialization
+- **Encoding**: RLP for canonical serialization (compatible with Ethereum)
 - **Addresses**: Last 20 bytes of keccak(pubkey)
+
+### Leader Rotation
+
+The system implements deterministic leader rotation to ensure liveness:
+
+- **Round-Robin Selection**: Proposer rotates based on `height % members.length`
+- **Deterministic Ordering**: Members sorted lexicographically for consistency
+- **Timeout Mechanism**: Exponential backoff (5s base, 1.5x multiplier, 60s max)
+- **Re-proposal**: If proposer times out, any node can trigger re-proposal
 
 ## Running the System
 
@@ -285,11 +307,15 @@ bun test                          # All tests
 bun test snapshot                 # Snapshot tests
 bun test negative                 # Failure scenarios
 bun test rlp-codec                # RLP encoding tests
+bun test proposer                 # Leader rotation tests
+bun test wal                      # WAL persistence tests
+bun test integration              # Integration tests
 
 # Development commands
-npm run lint                      # Run ESLint
-npm run format                    # Format with Prettier
-npm run check:all                 # Lint, format, and test
+bun run test:coverage             # Run tests with coverage report
+bun run lint                      # Run ESLint
+bun run format                    # Format with Prettier
+bun run check:all                 # Lint, format, and test
 ```
 
 ## Security Model
@@ -398,14 +424,28 @@ A comprehensive verification approach is documented in [Issue #5](https://github
 - Formal verification preparation
 - Simulation framework for edge cases
 
-## Future Extensions
+## Implemented Production Features (v0.5)
 
 ### Persistence Layer
 
-- Write-Ahead Log (WAL) for crash recovery
-- Periodic state snapshots for fast sync
-- Content-addressed storage for audit trails
-- Pruning strategies for long-running entities
+- ✅ **Write-Ahead Log (WAL)**: LevelDB-based crash recovery with atomic writes
+- ✅ **State Snapshots**: Periodic snapshots with automatic compaction
+- ✅ **Deterministic Replay**: Full state reconstruction from WAL entries
+- ✅ **Consistency Validation**: Input/frame count verification
+
+### Cryptographic Layer
+
+- ✅ **BLS12-381 Signatures**: Aggregate signature verification
+- ✅ **QuorumHash**: Prevents cross-quorum replay attacks
+- ✅ **RLP Encoding**: Ethereum-compatible serialization
+
+### Consensus Features
+
+- ✅ **Leader Rotation**: Round-robin proposer selection
+- ✅ **Proposal Timeouts**: Exponential backoff for network delays
+- ✅ **Multi-Entity Support**: Global merkle root across entities
+
+## Future Extensions
 
 ### Network Transport
 

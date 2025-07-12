@@ -7,6 +7,8 @@
 	"scripts": {
 		"start": "bun run src/index.ts",
 		"dev": "bun --watch src/index.ts",
+		"test": "bun test",
+		"test:coverage": "bun test --coverage",
 		"lint": "eslint src/**/*.ts",
 		"lint:fix": "eslint src/**/*.ts --fix",
 		"format": "prettier --write .",
