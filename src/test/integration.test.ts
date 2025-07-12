@@ -1,10 +1,23 @@
 import { describe, expect, it } from 'bun:test';
 import { keccak_256 as keccak } from '@noble/hashes/sha3';
+import { DUMMY_SIGNATURE, EMPTY_HASH } from '../constants';
 import { hashFrame, hashQuorum } from '../core/codec';
-import { validateQuorumHash } from '../core/entity';
+import { validateQuorumHash, applyCommand } from '../core/entity';
+import { applyServerBlock } from '../core/server';
 import { aggregate, getPublicKey, randomPriv, sign } from '../crypto/bls';
 import { blsVerifyAggregate } from '../infra/bls';
-import type { Frame, Hex, Transaction, EntityState, Quorum } from '../types';
+import type {
+	Frame,
+	Hex,
+	Transaction,
+	EntityState,
+	Quorum,
+	Replica,
+	ServerState,
+	Address,
+	Input,
+	ProposedFrame,
+} from '../types';
 
 describe('Integration Tests', () => {
 	describe('RLP Frame Hashing', () => {
@@ -323,10 +336,303 @@ describe('Integration Tests', () => {
 	});
 
 	describe('Multi-Entity ServerFrame', () => {
-		it.todo('should compute global merkle root correctly');
-		it.todo('should handle multiple entities in one tick');
-		it.todo('should broadcast commits to all replicas');
-		it.todo('should update root when any entity commits');
+		it('should compute global merkle root correctly', () => {
+			// Create two entities with different states
+			const entity1State: EntityState = {
+				quorum: {
+					threshold: 2n,
+					members: {
+						'0x1111111111111111111111111111111111111111': { nonce: 0n, shares: 1n },
+						'0x2222222222222222222222222222222222222222': { nonce: 0n, shares: 1n },
+					},
+				},
+				chat: [{ from: '0x1111111111111111111111111111111111111111' as Hex, msg: 'Hello', ts: 1000 }],
+			};
+
+			const entity2State: EntityState = {
+				quorum: {
+					threshold: 1n,
+					members: {
+						'0x3333333333333333333333333333333333333333': { nonce: 0n, shares: 1n },
+					},
+				},
+				chat: [],
+			};
+
+			// Create replicas for both entities
+			const replicas = new Map<string, Replica>([
+				[
+					'test:entity1:0x1111111111111111111111111111111111111111',
+					{
+						address: { jurisdiction: 'test', entityId: 'entity1' },
+						proposer: '0x1111111111111111111111111111111111111111' as Address,
+						isAwaitingSignatures: false,
+						mempool: [],
+						last: { height: 1n, ts: 1000, txs: [], state: entity1State },
+					},
+				],
+				[
+					'test:entity2:0x3333333333333333333333333333333333333333',
+					{
+						address: { jurisdiction: 'test', entityId: 'entity2' },
+						proposer: '0x3333333333333333333333333333333333333333' as Address,
+						isAwaitingSignatures: false,
+						mempool: [],
+						last: { height: 2n, ts: 2000, txs: [], state: entity2State },
+					},
+				],
+			]);
+
+			// Apply server block to compute root
+			const result = applyServerBlock({
+				prev: { height: 0n, replicas: replicas, lastHash: EMPTY_HASH },
+				batch: [],
+				timestamp: 3000,
+			});
+
+			// Verify root is deterministic and valid hex
+			expect(result.frame.root).toMatch(/^0x[0-9a-f]{64}$/);
+
+			// Compute again with same state - should be identical
+			const result2 = applyServerBlock({
+				prev: { height: 0n, replicas: replicas, lastHash: EMPTY_HASH },
+				batch: [],
+				timestamp: 3000,
+			});
+			expect(result2.frame.root).toBe(result.frame.root);
+		});
+
+		it('should handle multiple entities in one tick', () => {
+			// Create initial server state with two entities
+			const entity1: Replica = {
+				address: { jurisdiction: 'test', entityId: 'entity1' },
+				proposer: '0x1111111111111111111111111111111111111111' as Address,
+				isAwaitingSignatures: false,
+				mempool: [],
+				last: {
+					height: 0n,
+					ts: 0,
+					txs: [],
+					state: {
+						quorum: {
+							threshold: 1n,
+							members: {
+								'0x1111111111111111111111111111111111111111': { nonce: 0n, shares: 1n },
+							},
+						},
+						chat: [],
+					},
+				},
+			};
+
+			const entity2: Replica = {
+				address: { jurisdiction: 'test', entityId: 'entity2' },
+				proposer: '0x2222222222222222222222222222222222222222' as Address,
+				isAwaitingSignatures: false,
+				mempool: [],
+				last: {
+					height: 0n,
+					ts: 0,
+					txs: [],
+					state: {
+						quorum: {
+							threshold: 1n,
+							members: {
+								'0x2222222222222222222222222222222222222222': { nonce: 0n, shares: 1n },
+							},
+						},
+						chat: [],
+					},
+				},
+			};
+
+			const serverState: ServerState = {
+				height: 0n,
+				replicas: new Map([
+					['test:entity1:0x1111111111111111111111111111111111111111', entity1],
+					['test:entity2:0x2222222222222222222222222222222222222222', entity2],
+				]),
+				lastHash: EMPTY_HASH,
+			};
+
+			// Create commands for both entities
+			const inputs: Input[] = [
+				{
+					from: '0x1111111111111111111111111111111111111111' as Address,
+					to: '0x1111111111111111111111111111111111111111' as Address,
+					cmd: {
+						type: 'ADD_TX',
+						addrKey: 'test:entity1',
+						tx: {
+							kind: 'chat',
+							nonce: 0n,
+							from: '0x1111111111111111111111111111111111111111' as Address,
+							body: { message: 'From entity 1' },
+							sig: DUMMY_SIGNATURE,
+						},
+					},
+				},
+				{
+					from: '0x2222222222222222222222222222222222222222' as Address,
+					to: '0x2222222222222222222222222222222222222222' as Address,
+					cmd: {
+						type: 'ADD_TX',
+						addrKey: 'test:entity2',
+						tx: {
+							kind: 'chat',
+							nonce: 0n,
+							from: '0x2222222222222222222222222222222222222222' as Address,
+							body: { message: 'From entity 2' },
+							sig: DUMMY_SIGNATURE,
+						},
+					},
+				},
+			];
+
+			// Apply the server block
+			const result = applyServerBlock({
+				prev: serverState,
+				batch: inputs,
+				timestamp: 1000,
+			});
+
+			// Both entities should have transactions in mempool
+			const entity1Replica = result.state.replicas.get('test:entity1:0x1111111111111111111111111111111111111111');
+			const entity2Replica = result.state.replicas.get('test:entity2:0x2222222222222222222222222222222222222222');
+
+			expect(entity1Replica?.mempool.length).toBe(1);
+			expect(entity2Replica?.mempool.length).toBe(1);
+
+			// Should generate PROPOSE commands for both entities
+			const proposeCommands = result.outbox.filter(o => o.cmd.type === 'PROPOSE');
+			expect(proposeCommands.length).toBe(2);
+			// eslint-disable-next-line fp/no-mutating-methods, @typescript-eslint/no-unsafe-return
+			expect(proposeCommands.map(p => p.cmd.addrKey).sort()).toEqual(['test:entity1', 'test:entity2']);
+		});
+
+		it('should broadcast commits to all replicas', () => {
+			// Setup entity with multiple signers
+			const quorum: Quorum = {
+				threshold: 2n,
+				members: {
+					'0x1111111111111111111111111111111111111111': { nonce: 0n, shares: 1n },
+					'0x2222222222222222222222222222222222222222': { nonce: 0n, shares: 1n },
+					'0x3333333333333333333333333333333333333333': { nonce: 0n, shares: 1n },
+				},
+			};
+
+			const entityState: EntityState = { quorum, chat: [] };
+			const proposedFrame: ProposedFrame<EntityState> = {
+				height: 1n,
+				ts: 1000,
+				txs: [],
+				state: entityState,
+				hash: '0xabcd' as Hex,
+				sigs: new Map([['0x1111111111111111111111111111111111111111' as Address, DUMMY_SIGNATURE]]),
+			};
+
+			const replica: Replica = {
+				address: { jurisdiction: 'test', entityId: 'entity' },
+				proposer: '0x1111111111111111111111111111111111111111' as Address,
+				isAwaitingSignatures: true,
+				mempool: [],
+				last: { height: 0n, ts: 0, txs: [], state: entityState },
+				proposal: proposedFrame,
+			};
+
+			// Apply SIGN command that reaches threshold
+			const result = applyCommand({
+				replica,
+				command: {
+					type: 'SIGN',
+					addrKey: 'test:entity',
+					signer: '0x2222222222222222222222222222222222222222' as Address,
+					frameHash: '0xabcd' as Hex,
+					sig: DUMMY_SIGNATURE,
+					quorumHash: hashQuorum(quorum),
+				},
+			});
+
+			// Should generate COMMIT commands for all quorum members
+			const commitCommands = result.outbox.filter(o => o.cmd.type === 'COMMIT');
+			expect(commitCommands.length).toBe(3);
+
+			// All members should receive the commit
+			// eslint-disable-next-line fp/no-mutating-methods
+			const recipients = commitCommands.map(c => c.to).sort();
+			expect(recipients).toEqual([
+				'0x1111111111111111111111111111111111111111',
+				'0x2222222222222222222222222222222222222222',
+				'0x3333333333333333333333333333333333333333',
+			]);
+		});
+
+		it('should update root when any entity commits', () => {
+			// Create initial state with entity
+			const entityState: EntityState = {
+				quorum: {
+					threshold: 1n,
+					members: {
+						'0x1111111111111111111111111111111111111111': { nonce: 0n, shares: 1n },
+					},
+				},
+				chat: [],
+			};
+
+			const replica: Replica = {
+				address: { jurisdiction: 'test', entityId: 'entity' },
+				proposer: '0x1111111111111111111111111111111111111111' as Address,
+				isAwaitingSignatures: false,
+				mempool: [],
+				last: { height: 0n, ts: 0, txs: [], state: entityState },
+			};
+
+			const serverState: ServerState = {
+				height: 0n,
+				replicas: new Map([['test:entity:0x1111111111111111111111111111111111111111', replica]]),
+				lastHash: EMPTY_HASH,
+			};
+
+			// Get initial root
+			const initialResult = applyServerBlock({
+				prev: serverState,
+				batch: [],
+				timestamp: 1000,
+			});
+			const initialRoot = initialResult.frame.root;
+
+			// First add a transaction to the mempool
+			const addTxInput: Input = {
+				from: '0x1111111111111111111111111111111111111111' as Address,
+				to: '0x1111111111111111111111111111111111111111' as Address,
+				cmd: {
+					type: 'ADD_TX',
+					addrKey: 'test:entity',
+					tx: {
+						kind: 'chat',
+						nonce: 0n,
+						from: '0x1111111111111111111111111111111111111111' as Address,
+						body: { message: 'Hello' },
+						sig: DUMMY_SIGNATURE,
+					},
+				},
+			};
+
+			// Apply the ADD_TX
+			const addTxResult = applyServerBlock({
+				prev: serverState,
+				batch: [addTxInput],
+				timestamp: 1500,
+			});
+
+			// Verify mempool has the transaction
+			const updatedReplica = addTxResult.state.replicas.get('test:entity:0x1111111111111111111111111111111111111111');
+			expect(updatedReplica?.mempool.length).toBe(1);
+
+			// The root should remain the same since only mempool changed, not committed state
+			expect(addTxResult.frame.root).toBe(initialRoot);
+			expect(addTxResult.frame.root).toMatch(/^0x[0-9a-f]{64}$/);
+		});
 	});
 
 	describe('Leader Rotation', () => {

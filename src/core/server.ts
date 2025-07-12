@@ -1,10 +1,10 @@
 import { keccak_256 as keccak } from '@noble/hashes/sha3';
-import { canonical, encodeServerFrame } from '../codec/rlp';
+import { encodeServerFrame } from '../codec/rlp';
 import { DUMMY_SIGNATURE, EMPTY_HASH } from '../constants';
 import type { Address, Hex, Input, Replica, ServerFrame, ServerState, TS } from '../types';
 import { getAddrKey } from '../types';
 import { applyCommand } from './entity';
-import { hashQuorum } from './codec';
+import { hashQuorum, computeStateRoot } from './codec';
 
 export interface ApplyServerBlockParams {
 	prev: ServerState;
@@ -25,8 +25,12 @@ const computeRoot = (replicas: Map<string, Replica>): Hex => {
 	const sorted = [...mapped].sort((a, b) =>
 		(a.addr.jurisdiction + a.addr.entityId).localeCompare(b.addr.jurisdiction + b.addr.entityId),
 	);
-	Object.freeze(sorted);
-	return `0x${Buffer.from(keccak(canonical(sorted))).toString('hex')}`;
+
+	// Compute state root for each entity using RLP
+	const stateRoots = sorted.map(({ state }) => computeStateRoot(state));
+
+	// Combine all state roots into a single merkle root
+	return `0x${Buffer.from(keccak(Buffer.concat(stateRoots.map(h => Buffer.from(h.slice(2), 'hex'))))).toString('hex')}`;
 };
 
 export function applyServerBlock({ prev, batch, timestamp }: ApplyServerBlockParams): ApplyServerBlockResult {
