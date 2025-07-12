@@ -1,13 +1,6 @@
 import { keccak_256 as keccak } from '@noble/hashes/sha3';
 import * as rlp from 'rlp';
-import type { EntityState, Hex, Quorum, Transaction } from '../types';
-
-interface FrameHeader {
-	height: bigint;
-	timestamp: number;
-	parentHash: Hex;
-	proposer: Hex;
-}
+import type { EntityState, FrameHeader, Hex, Quorum, Transaction } from '../types';
 
 const convertBigIntToBuffer = (n: bigint): Buffer => {
 	if (n === 0n) return Buffer.alloc(0);
@@ -19,7 +12,7 @@ const hexToBuf = (hex: Hex): Buffer => Buffer.from(hex.startsWith('0x') ? hex.sl
 
 const encodeHeader = (h: FrameHeader): Buffer[] => [
 	convertBigIntToBuffer(h.height),
-	convertBigIntToBuffer(BigInt(h.timestamp)),
+	convertBigIntToBuffer(h.timestamp), // Already bigint in FrameHeader
 	hexToBuf(h.parentHash),
 	hexToBuf(h.proposer),
 ];

@@ -24,6 +24,7 @@ export interface ValidateCommitParams {
 	hanko: Hex;
 	prev: Frame<EntityState>;
 	signers: Address[];
+	proposer: Address;
 }
 
 export interface ApplyTxParams {
@@ -36,6 +37,7 @@ export interface ExecFrameParams {
 	prev: Frame<EntityState>;
 	transactions: Transaction[];
 	timestamp: TS;
+	proposer: Address;
 }
 
 export interface ApplyCommandParams {
@@ -61,8 +63,12 @@ export const validateQuorumHash = (quorum: Quorum, quorumHash: Hex): Result<true
 
 /** Compute canonical hash of a frame's content using RLP encoding and keccak256. */
 export const hashFrame = <T>(frame: Frame<T>): Hex => {
-	// For now, we'll use a simplified header that works with current Frame structure
-	// In the future, we should add parentHash and proposer to Frame type
+	// Use header if available (new format), otherwise create from legacy fields
+	if (frame.header) {
+		return computeFrameHash(frame.header, frame.body?.transactions || frame.txs);
+	}
+
+	// Legacy format - use defaults for missing fields
 	const header = {
 		height: frame.height,
 		timestamp: frame.ts,
@@ -72,8 +78,21 @@ export const hashFrame = <T>(frame: Frame<T>): Hex => {
 	return computeFrameHash(header, frame.txs);
 };
 
-const sortTransaction = (a: Transaction, b: Transaction): number =>
-	a.nonce < b.nonce ? -1 : a.nonce > b.nonce ? 1 : a.from.localeCompare(b.from);
+const sortTransaction = (a: Transaction, b: Transaction): number => {
+	// Primary sort: nonce
+	if (a.nonce !== b.nonce) {
+		return a.nonce < b.nonce ? -1 : 1;
+	}
+
+	// Secondary sort: from (signerId)
+	const fromCompare = a.from.localeCompare(b.from);
+	if (fromCompare !== 0) {
+		return fromCompare;
+	}
+
+	// Tertiary sort: kind
+	return a.kind.localeCompare(b.kind);
+};
 
 type Validator<T> = (params: T) => Result<T>;
 
@@ -81,10 +100,12 @@ const checkHeight: Validator<ValidateCommitParams> = params =>
 	params.frame.height === params.prev.height + 1n ? ok(params) : err('Height mismatch');
 
 const checkStateReplay: Validator<ValidateCommitParams> = params => {
+	const proposer: Address = params.frame.header?.proposer || params.proposer;
 	const replayResult = execFrame({
 		prev: params.prev,
 		transactions: params.frame.txs,
 		timestamp: params.frame.ts,
+		proposer,
 	});
 	if (!replayResult.ok) return err('Failed to replay frame');
 
@@ -152,7 +173,7 @@ export const applyTx = ({ state, transaction: tx, timestamp }: ApplyTxParams): R
 };
 
 /** Execute a batch of transactions on the previous frame's state to produce a new Frame. */
-export const execFrame = ({ prev, transactions, timestamp }: ExecFrameParams): Result<Frame<EntityState>> => {
+export const execFrame = ({ prev, transactions, timestamp, proposer }: ExecFrameParams): Result<Frame<EntityState>> => {
 	// eslint-disable-next-line fp/no-mutating-methods
 	const orderedTxs = [...transactions].sort(sortTransaction);
 
@@ -162,14 +183,32 @@ export const execFrame = ({ prev, transactions, timestamp }: ExecFrameParams): R
 		ok(prev.state),
 	);
 
-	return finalStateResult.ok
-		? ok({
-				height: prev.height + 1n,
-				ts: timestamp,
-				txs: orderedTxs,
-				state: finalStateResult.value,
-			})
-		: finalStateResult;
+	if (!finalStateResult.ok) {
+		return finalStateResult;
+	}
+
+	const newHeight = prev.height + 1n;
+	const timestampBigInt = BigInt(timestamp);
+	const parentHash = hashFrame(prev);
+
+	return ok({
+		// New spec-compliant fields
+		header: {
+			height: newHeight,
+			timestamp: timestampBigInt,
+			parentHash,
+			proposer,
+		},
+		body: {
+			transactions: orderedTxs,
+			state: finalStateResult.value,
+		},
+		// Legacy fields for compatibility
+		height: newHeight,
+		ts: timestamp,
+		txs: orderedTxs,
+		state: finalStateResult.value,
+	});
 };
 
 type CommandHandler<T extends Command = Command> = (replica: Replica, command: T) => ApplyCommandResult;
@@ -198,6 +237,7 @@ const handlePropose: CommandHandler = (replica, command) => {
 		prev: replica.last,
 		transactions: replica.mempool,
 		timestamp: command.ts,
+		proposer: replica.proposer,
 	});
 
 	if (!frameResult.ok) {
@@ -288,6 +328,10 @@ const handleSign: CommandHandler = (replica, command) => {
 				addrKey: command.addrKey,
 				hanko: DUMMY_SIGNATURE,
 				frame: {
+					// Include header/body if present in proposal
+					header: updatedProposal.header,
+					body: updatedProposal.body,
+					// Legacy fields
 					height: updatedProposal.height,
 					ts: updatedProposal.ts,
 					txs: updatedProposal.txs,
@@ -319,6 +363,7 @@ const handleCommit: CommandHandler = (replica, command) => {
 		hanko: command.hanko,
 		prev: replica.last,
 		signers: command.signers,
+		proposer: replica.proposer,
 	});
 
 	if (!isValid) return { replica, outbox: [] };

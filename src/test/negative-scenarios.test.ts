@@ -163,7 +163,12 @@ describe('XLN Negative Path Tests', () => {
 				sig: DUMMY_SIGNATURE,
 			};
 
-			const result = execFrame({ prev, transactions: [badTx], timestamp: Date.now() });
+			const result = execFrame({
+				prev,
+				transactions: [badTx],
+				timestamp: Date.now(),
+				proposer: '0x1111111111111111111111111111111111111111' as Address,
+			});
 			expect(result.ok).toBe(false);
 			if (!result.ok) {
 				expect(result.error).toBe('Bad nonce');
