@@ -7,8 +7,9 @@ import {
 	TOTAL_SIGNERS,
 } from '../constants';
 import { type PubKey, aggregate, deriveAddress, getPublicKey, randomPriv, sign } from '../crypto/bls';
-import type { Address, Hex, Input, Replica, ServerFrame } from '../types';
+import type { Address, Hex, Input, Replica, ServerFrame, ServerState } from '../types';
 import { applyServerBlock } from './server';
+import type { WAL } from '../infra/wal';
 
 const generateSigners = (count: number) => {
 	const privs = Array.from({ length: count }, randomPriv);
@@ -38,13 +39,22 @@ export interface Runtime {
 	readonly PRIVS: readonly Hex[];
 	debugReplicas(): Map<string, Replica>;
 	tick(params: TickParams): TickResult;
+	tickAsync(params: TickParams): Promise<TickResult>;
 }
 
-export const createRuntime = (): Runtime => {
-	const initialReplicas = new Map<string, Replica>();
+export interface RuntimeOptions {
+	wal?: WAL;
+	initialState?: ServerState;
+}
 
+export const createRuntime = (options: RuntimeOptions = {}): Runtime => {
+	const { wal, initialState } = options;
+
+	const initialReplicas = initialState?.replicas ?? new Map<string, Replica>();
+
+	// TODO: there is no need in "current". "lastHash" can be replaced with timestamp
 	const stateRef = {
-		current: {
+		current: initialState ?? {
 			replicas: initialReplicas,
 			height: INITIAL_HEIGHT,
 			lastHash: EMPTY_HASH,
@@ -98,6 +108,12 @@ export const createRuntime = (): Runtime => {
 	};
 
 	const tick = ({ now, incoming }: TickParams): TickResult => {
+		// Append inputs to WAL before processing
+		if (wal && incoming.length > 0) {
+			// Fire and forget - we don't await to avoid blocking
+			void wal.appendInputBatch(incoming);
+		}
+
 		const {
 			state: nextState,
 			frame,
@@ -114,6 +130,46 @@ export const createRuntime = (): Runtime => {
 			`Committed ServerFrame #${frame.height.toString()} – hash: ${frame.hash.slice(0, HASH_DISPLAY_LENGTH)}... root: ${frame.root.slice(0, HASH_DISPLAY_LENGTH)}...`,
 		);
 
+		// Append frame to WAL after processing
+		if (wal) {
+			// Fire and forget - we don't await to avoid blocking
+			void wal.appendServerFrame(frame);
+		}
+
+		// eslint-disable-next-line functional/immutable-data, fp/no-mutation
+		stateRef.current = nextState;
+		return { outbox: fulfilledOutbox, frame };
+	};
+
+	const tickAsync = async (params: TickParams): Promise<TickResult> => {
+		const { now, incoming } = params;
+
+		// Append inputs to WAL before processing
+		if (wal && incoming.length > 0) {
+			await wal.appendInputBatch(incoming);
+		}
+
+		const {
+			state: nextState,
+			frame,
+			outbox,
+		} = applyServerBlock({
+			prev: stateRef.current,
+			batch: incoming,
+			timestamp: now,
+		});
+
+		const fulfilledOutbox = outbox.map(fulfillSignature);
+
+		console.log(
+			`Committed ServerFrame #${frame.height.toString()} – hash: ${frame.hash.slice(0, HASH_DISPLAY_LENGTH)}... root: ${frame.root.slice(0, HASH_DISPLAY_LENGTH)}...`,
+		);
+
+		// Append frame to WAL after processing
+		if (wal) {
+			await wal.appendServerFrame(frame);
+		}
+
 		// eslint-disable-next-line functional/immutable-data, fp/no-mutation
 		stateRef.current = nextState;
 		return { outbox: fulfilledOutbox, frame };
@@ -124,5 +180,6 @@ export const createRuntime = (): Runtime => {
 		PRIVS: PRIV_HEXES,
 		debugReplicas,
 		tick,
+		tickAsync,
 	};
 };

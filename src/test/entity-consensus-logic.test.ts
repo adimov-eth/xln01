@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { hashQuorum } from '../core/codec';
 import { DUMMY_SIGNATURE } from '../constants';
 import { applyCommand } from '../core/entity';
 import type { Address, EntityState, Frame, Hex, Replica } from '../types';
@@ -53,6 +54,7 @@ describe('Entity Layer Consensus Logic', () => {
 				type: 'PROPOSE',
 				addrKey: 'test:entity',
 				ts: Date.now(),
+				quorumHash: hashQuorum(replicaWithMempool.last.state.quorum),
 			},
 		});
 
@@ -94,6 +96,7 @@ describe('Entity Layer Consensus Logic', () => {
 				signer: '0x2222222222222222222222222222222222222222' as Address,
 				frameHash: proposalHash,
 				sig: DUMMY_SIGNATURE,
+				quorumHash: hashQuorum(replica.last.state.quorum),
 			},
 		});
 
@@ -134,6 +137,7 @@ describe('Entity Layer Consensus Logic', () => {
 				signer: '0x1111111111111111111111111111111111111111' as Address,
 				frameHash: proposalHash,
 				sig: DUMMY_SIGNATURE,
+				quorumHash: hashQuorum(replica.last.state.quorum),
 			},
 		});
 

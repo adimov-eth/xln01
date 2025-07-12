@@ -8,7 +8,7 @@ import {
 } from './constants';
 import { createRuntime } from './core/runtime';
 import { sign } from './crypto/bls';
-import type { Address, EntityState, Frame, Input, Quorum, Replica, SignerRecord, Transaction } from './types';
+import type { Address, EntityState, Frame, Hex, Input, Quorum, Replica, SignerRecord, Transaction } from './types';
 
 // Demo script showing multiple consensus rounds
 
@@ -36,6 +36,18 @@ const createGenesisReplica = (): Replica => {
 
 	const initState: EntityState = { quorum, chat: [] };
 	const initFrame: Frame<EntityState> = {
+		// New spec fields
+		header: {
+			height: 0n,
+			timestamp: 0n,
+			parentHash: '0x0000000000000000000000000000000000000000000000000000000000000000' as Hex,
+			proposer: '0x0000000000000000000000000000000000000000' as Address,
+		},
+		body: {
+			transactions: [],
+			state: initState,
+		},
+		// Legacy fields
 		height: 0n,
 		ts: 0,
 		txs: [],

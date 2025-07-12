@@ -1,6 +1,17 @@
 {
 	"permissions": {
-		"allow": ["Bash(rg:*)", "Bash(npx eslint:*)", "Bash(grep:*)", "Bash(bun test:*)"],
+		"allow": [
+			"Bash(rg:*)",
+			"Bash(npx eslint:*)",
+			"Bash(grep:*)",
+			"Bash(bun test:*)",
+			"Bash(git add:*)",
+			"Bash(git commit:*)",
+			"Bash(git checkout:*)",
+			"Bash(bun build:*)",
+			"Bash(bun run:*)",
+			"Bash(bunx tsc:*)"
+		],
 		"deny": []
 	}
 }

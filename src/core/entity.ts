@@ -1,7 +1,6 @@
-import { keccak_256 as keccak } from '@noble/hashes/sha3';
-import { canonical } from '../codec/rlp';
 import { DUMMY_SIGNATURE } from '../constants';
-import { type PubKey, verifyAggregate } from '../crypto/bls';
+import { type PubKey } from '../crypto/bls';
+import { blsVerifyAggregate } from '../infra/bls';
 import type {
 	Address,
 	Command,
@@ -17,6 +16,7 @@ import type {
 	Transaction,
 } from '../types';
 import { err, ok } from '../types';
+import { hashFrame as computeFrameHash, hashQuorum } from './codec';
 import { ADDR_TO_PUB } from './runtime';
 
 export interface ValidateCommitParams {
@@ -24,6 +24,7 @@ export interface ValidateCommitParams {
 	hanko: Hex;
 	prev: Frame<EntityState>;
 	signers: Address[];
+	proposer: Address;
 }
 
 export interface ApplyTxParams {
@@ -36,6 +37,7 @@ export interface ExecFrameParams {
 	prev: Frame<EntityState>;
 	transactions: Transaction[];
 	timestamp: TS;
+	proposer: Address;
 }
 
 export interface ApplyCommandParams {
@@ -53,13 +55,44 @@ export const calculateQuorumPower = (quorum: Quorum, signers: Address[] | Map<Ad
 	return addresses.reduce((sum, addr) => sum + (quorum.members[addr]?.shares ?? 0n), 0n);
 };
 
-/** Compute canonical hash of a frame's content using keccak256. */
-export const hashFrame = <T>(frame: Frame<T>): Hex => {
-	return `0x${Buffer.from(keccak(canonical(frame))).toString('hex')}`;
+/** Validate that the quorumHash matches the current quorum */
+export const validateQuorumHash = (quorum: Quorum, quorumHash: Hex): Result<true, string> => {
+	const expectedHash = hashQuorum(quorum);
+	return quorumHash === expectedHash ? ok(true) : err(`Quorum hash mismatch: ${quorumHash} != ${expectedHash}`);
 };
 
-const sortTransaction = (a: Transaction, b: Transaction): number =>
-	a.nonce < b.nonce ? -1 : a.nonce > b.nonce ? 1 : a.from.localeCompare(b.from);
+/** Compute canonical hash of a frame's content using RLP encoding and keccak256. */
+export const hashFrame = <T>(frame: Frame<T>): Hex => {
+	// Use header if available (new format), otherwise create from legacy fields
+	if (frame.header) {
+		return computeFrameHash(frame.header, frame.body?.transactions || frame.txs);
+	}
+
+	// Legacy format - use defaults for missing fields
+	const header = {
+		height: frame.height,
+		timestamp: BigInt(frame.ts), // Convert number to bigint
+		parentHash: '0x0000000000000000000000000000000000000000000000000000000000000000' as Hex,
+		proposer: '0x0000000000000000000000000000000000000000' as Hex,
+	};
+	return computeFrameHash(header, frame.txs);
+};
+
+const sortTransaction = (a: Transaction, b: Transaction): number => {
+	// Primary sort: nonce
+	if (a.nonce !== b.nonce) {
+		return a.nonce < b.nonce ? -1 : 1;
+	}
+
+	// Secondary sort: from (signerId)
+	const fromCompare = a.from.localeCompare(b.from);
+	if (fromCompare !== 0) {
+		return fromCompare;
+	}
+
+	// Tertiary sort: kind
+	return a.kind.localeCompare(b.kind);
+};
 
 type Validator<T> = (params: T) => Result<T>;
 
@@ -67,10 +100,12 @@ const checkHeight: Validator<ValidateCommitParams> = params =>
 	params.frame.height === params.prev.height + 1n ? ok(params) : err('Height mismatch');
 
 const checkStateReplay: Validator<ValidateCommitParams> = params => {
+	const proposer: Address = params.frame.header?.proposer || params.proposer;
 	const replayResult = execFrame({
 		prev: params.prev,
 		transactions: params.frame.txs,
 		timestamp: params.frame.ts,
+		proposer,
 	});
 	if (!replayResult.ok) return err('Failed to replay frame');
 
@@ -94,16 +129,13 @@ const checkSignatures: Validator<ValidateCommitParams> = params => {
 		return err('Missing public keys for some signers');
 	}
 
-	try {
-		const isValid = verifyAggregate({
-			hanko: params.hanko,
-			messageHash: hashFrame(params.frame),
-			publicKeys: pubKeys,
-		});
-		return isValid ? ok(params) : err('Invalid aggregate signature');
-	} catch (e) {
-		return err(`BLS verification error: ${String(e)}`);
-	}
+	const verifyResult = blsVerifyAggregate({
+		sig: params.hanko,
+		msgHash: hashFrame(params.frame),
+		pubKeys,
+	});
+
+	return verifyResult.ok ? ok(params) : err(verifyResult.error.message);
 };
 
 const compose =
@@ -141,7 +173,7 @@ export const applyTx = ({ state, transaction: tx, timestamp }: ApplyTxParams): R
 };
 
 /** Execute a batch of transactions on the previous frame's state to produce a new Frame. */
-export const execFrame = ({ prev, transactions, timestamp }: ExecFrameParams): Result<Frame<EntityState>> => {
+export const execFrame = ({ prev, transactions, timestamp, proposer }: ExecFrameParams): Result<Frame<EntityState>> => {
 	// eslint-disable-next-line fp/no-mutating-methods
 	const orderedTxs = [...transactions].sort(sortTransaction);
 
@@ -151,14 +183,32 @@ export const execFrame = ({ prev, transactions, timestamp }: ExecFrameParams): R
 		ok(prev.state),
 	);
 
-	return finalStateResult.ok
-		? ok({
-				height: prev.height + 1n,
-				ts: timestamp,
-				txs: orderedTxs,
-				state: finalStateResult.value,
-			})
-		: finalStateResult;
+	if (!finalStateResult.ok) {
+		return finalStateResult;
+	}
+
+	const newHeight = prev.height + 1n;
+	const timestampBigInt = BigInt(timestamp);
+	const parentHash = hashFrame(prev);
+
+	return ok({
+		// New spec-compliant fields
+		header: {
+			height: newHeight,
+			timestamp: timestampBigInt,
+			parentHash,
+			proposer,
+		},
+		body: {
+			transactions: orderedTxs,
+			state: finalStateResult.value,
+		},
+		// Legacy fields for compatibility
+		height: newHeight,
+		ts: timestamp,
+		txs: orderedTxs,
+		state: finalStateResult.value,
+	});
 };
 
 type CommandHandler<T extends Command = Command> = (replica: Replica, command: T) => ApplyCommandResult;
@@ -172,6 +222,13 @@ const handleAddTx: CommandHandler = (replica, command) => {
 const handlePropose: CommandHandler = (replica, command) => {
 	if (command.type !== 'PROPOSE') return { replica, outbox: [] };
 
+	// Validate quorumHash
+	const quorumHashResult = validateQuorumHash(replica.last.state.quorum, command.quorumHash);
+	if (!quorumHashResult.ok) {
+		console.log(`PROPOSE failed: ${quorumHashResult.error}`);
+		return { replica, outbox: [] };
+	}
+
 	if (replica.isAwaitingSignatures || replica.mempool.length === 0) {
 		return { replica, outbox: [] };
 	}
@@ -180,6 +237,7 @@ const handlePropose: CommandHandler = (replica, command) => {
 		prev: replica.last,
 		transactions: replica.mempool,
 		timestamp: command.ts,
+		proposer: replica.proposer,
 	});
 
 	if (!frameResult.ok) {
@@ -198,6 +256,7 @@ const handlePropose: CommandHandler = (replica, command) => {
 			needsProposerSig && replica.proposer
 				? new Map<Address, Hex>([[replica.proposer, DUMMY_SIGNATURE]])
 				: new Map<Address, Hex>(),
+		proposalTs: command.ts,
 	};
 
 	const updatedReplica = {
@@ -208,6 +267,7 @@ const handlePropose: CommandHandler = (replica, command) => {
 	};
 
 	// Generate SIGN requests for all quorum members
+	const quorumHash = hashQuorum(quorum);
 	const outbox: Input[] = Object.keys(quorum.members).map(s => ({
 		from: s as Address,
 		to: replica.proposer,
@@ -217,6 +277,7 @@ const handlePropose: CommandHandler = (replica, command) => {
 			signer: s as Address,
 			frameHash: proposal.hash,
 			sig: DUMMY_SIGNATURE,
+			quorumHash,
 		},
 	}));
 
@@ -225,6 +286,13 @@ const handlePropose: CommandHandler = (replica, command) => {
 
 const handleSign: CommandHandler = (replica, command) => {
 	if (command.type !== 'SIGN') return { replica, outbox: [] };
+
+	// Validate quorumHash
+	const quorumHashResult = validateQuorumHash(replica.last.state.quorum, command.quorumHash);
+	if (!quorumHashResult.ok) {
+		console.log(`SIGN failed: ${quorumHashResult.error}`);
+		return { replica, outbox: [] };
+	}
 
 	const { proposal, isAwaitingSignatures, last } = replica;
 	if (!isAwaitingSignatures || !proposal) return { replica, outbox: [] };
@@ -251,6 +319,7 @@ const handleSign: CommandHandler = (replica, command) => {
 
 	if (prevPower < quorum.threshold && newPower >= quorum.threshold) {
 		// Threshold reached: generate COMMIT commands for all replicas
+		const quorumHash = hashQuorum(quorum);
 		const outbox: Input[] = Object.keys(quorum.members).map(signerAddr => ({
 			from: replica.proposer,
 			to: signerAddr as Address,
@@ -259,12 +328,17 @@ const handleSign: CommandHandler = (replica, command) => {
 				addrKey: command.addrKey,
 				hanko: DUMMY_SIGNATURE,
 				frame: {
+					// Include header/body if present in proposal
+					header: updatedProposal.header,
+					body: updatedProposal.body,
+					// Legacy fields
 					height: updatedProposal.height,
 					ts: updatedProposal.ts,
 					txs: updatedProposal.txs,
 					state: updatedProposal.state,
 				},
 				signers: [],
+				quorumHash,
 				_sigs: Object.fromEntries(updatedProposal.sigs),
 			},
 		}));
@@ -277,11 +351,19 @@ const handleSign: CommandHandler = (replica, command) => {
 const handleCommit: CommandHandler = (replica, command) => {
 	if (command.type !== 'COMMIT') return { replica, outbox: [] };
 
+	// Validate quorumHash
+	const quorumHashResult = validateQuorumHash(replica.last.state.quorum, command.quorumHash);
+	if (!quorumHashResult.ok) {
+		console.log(`COMMIT failed: ${quorumHashResult.error}`);
+		return { replica, outbox: [] };
+	}
+
 	const isValid = validateCommit({
 		frame: command.frame,
 		hanko: command.hanko,
 		prev: replica.last,
 		signers: command.signers,
+		proposer: replica.proposer,
 	});
 
 	if (!isValid) return { replica, outbox: [] };
@@ -309,6 +391,7 @@ const commandHandlers: Record<Command['type'], CommandHandler> = {
 };
 
 /** Apply a high-level command to a replica's state. Returns a new Replica state and outbox (no mutation). */
+// TODO: rename to applyEntityInput or similar for clarity
 export const applyCommand = ({ replica, command }: ApplyCommandParams): ApplyCommandResult => {
 	const handler = commandHandlers[command.type];
 	return handler ? handler(replica, command) : { replica, outbox: [] };

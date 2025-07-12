@@ -903,6 +903,7 @@ const applyServerMessage = ({ replicas, message }: ApplyMessageParams): ApplyMes
 	switch (cmd.type) {
 		case 'IMPORT': {
 			// Create new replicas for all signers
+			// TODO: doublecheck case for distributed Network
 			const { replica } = cmd;
 			const { jurisdiction, entityId } = replica.address;
 			const updatedReplicas = new Map(replicas);

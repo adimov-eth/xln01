@@ -7,8 +7,14 @@ describe('XLN Consensus Snapshot Test', () => {
 	test('single tick happy path produces expected state', () => {
 		// Initialize runtime
 		const runtime = createRuntime();
-		const fromAddr = runtime.ADDRS[0];
-		const privKey = runtime.PRIVS[0];
+		// The IMPORT creates height 1, so the next tick will be height 2
+		// Find who will be proposer at height 2
+		// eslint-disable-next-line fp/no-mutating-methods
+		const sortedAddrs = [...runtime.ADDRS].sort();
+		const proposerAtHeight2 = sortedAddrs[2 % sortedAddrs.length];
+		const proposerIndex = runtime.ADDRS.indexOf(proposerAtHeight2);
+		const fromAddr = runtime.ADDRS[proposerIndex];
+		const privKey = runtime.PRIVS[proposerIndex];
 
 		// Helper to create the genesis replica for IMPORT
 		const createGenesisReplica = (): Replica => {
@@ -83,6 +89,7 @@ describe('XLN Consensus Snapshot Test', () => {
 
 		// Tick 1: Add transaction
 		const tick1Result = runtime.tick({ now: Date.now(), incoming: [addTxInput] });
+		// Since fromAddr is the proposer at height 2, we expect a PROPOSE
 		expect(tick1Result.outbox.length).toBe(1);
 		expect(tick1Result.outbox[0].cmd.type).toBe('PROPOSE');
 
