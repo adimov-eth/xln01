@@ -1,4 +1,4 @@
-# XLN: Cross-Local Network
+# XLN: Cross-Layer Network
 
 A Byzantine Fault Tolerant consensus system for cross-jurisdictional off-chain settlement with on-chain anchoring.
 
